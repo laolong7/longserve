@@ -142,6 +142,45 @@ const TOOLS = [
         required: ['name']
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'backup_file',
+      description:
+        '修改服务器上的任何配置文件/重要文件之前，先备份原文件（cp -a 原文件 原文件.laoji-bak-时间戳）。' +
+        '这是强制安全网：之后可以用 restore_file 一键还原。',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: '要备份的文件绝对路径' }
+        },
+        required: ['path']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'restore_file',
+      description: '把之前用 backup_file 备份的文件还原回原路径。会先弹窗请用户确认。用于撤销修改、回滚配置。',
+      parameters: {
+        type: 'object',
+        properties: {
+          backupPath: { type: 'string', description: '备份文件路径（.laoji-bak- 结尾的那份）' },
+          restoreTo: { type: 'string', description: '还原到的原路径' }
+        },
+        required: ['backupPath', 'restoreTo']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_snapshots',
+      description: '列出本会话中所有已备份的文件快照（路径、备份位置、时间）。用户问"改了哪些文件/怎么撤销"时调用。',
+      parameters: { type: 'object', properties: {}, required: [] }
+    }
   }
 ]
 
@@ -150,15 +189,23 @@ const SYSTEM_PROMPT = `你是牢笼的服务器管理 AI 副驾，运行在一�
 你的能力分三类：
 1. 服务器操作：run_command（在用户可见的终端里执行命令）、read_terminal（读终端画面）、sftp_list（查远程目录）
 2. 本机操作：list_local / read_local_file（查本机文件）、write_local_file（写本机文件，会请求确认）、delete_local（删本机文件，会请求确认）、download_server_file（服务器文件下载到本机，会请求确认）
-3. 技能：use_skill（加载用户自定义的技能内容）
+3. 安全网与技能：backup_file（改文件前先备份，强制）、restore_file（一键还原）、list_snapshots（查看快照）、use_skill（加载用户自定义的技能内容）
 
 工作守则：
 1. 执行命令前先用一句话说明要做什么、为什么；执行后主动 read_terminal 确认结果再向用户汇报
 2. 涉及删除、重启、修改配置、影响在线业务的操作属于重大操作，务必在 run_command 的 purpose 里写清楚影响；系统会自动弹窗让用户二次确认
-3. 一次只执行一条命令；避免执行长时间阻塞的命令（如 tail -f、top 交互模式、vim）
-4. 用户的本机是 Windows，路径用反斜杠（如 C:\\Users\\...）；给用户的桌面生成文件时用 systemContext 里提供的桌面路径
-5. 回答用中文，简洁专业，给出可操作的建议
-6. 不确定的事情就先用工具查证，不要凭空猜测`
+3. 【铁律】修改服务器上的任何配置文件或重要文件之前，必须先调用 backup_file 备份原文件；用户要求撤销/回滚时用 restore_file 还原，并 read_terminal 验证还原结果
+4. 一次只执行一条命令；避免执行长时间阻塞的命令（如 tail -f、top 交互模式、vim）
+5. 用户的本机是 Windows，路径用反斜杠（如 C:\\Users\\...）；给用户的桌面生成文件时用 systemContext 里提供的桌面路径
+6. 回答用中文，简洁专业，给出可操作的建议
+7. 不确定的事情就先用工具查证，不要凭空猜测`
+
+// 自然语言→命令模式（不走工具、不进历史上下文）
+const CMD_SYSTEM = `你是 Linux 命令转换器。把用户的自然语言需求翻译成一条 Linux 命令。
+规则：
+1. 只输出一条命令，放在一个代码块里，不写任何解释
+2. 命令面向典型 Linux 服务器（systemd 发行版），可用 sudo
+3. 尽量安全：优先查看类命令；涉及修改/删除时保持最小影响面`
 
 let msgSeq = 0
 const newMsgId = () => `msg_${Date.now()}_${++msgSeq}`
@@ -169,6 +216,8 @@ export const useAiStore = defineStore('ai', {
     messages: [],
     running: false,
     lastError: '',
+    cmdMode: false, // 命令模式：输入自然语言直译成命令（不调用工具）
+    snapshots: [], // 本会话文件快照 { path, backup, time, server, local? }
     _desktopPath: '', // 桌面路径缓存（本机文件工具/系统上下文用）
     // 当前会话元信息（历史记录用）
     sessionMeta: null // { id, title, serverName, host, createdAt, updatedAt, hasDanger }
@@ -179,6 +228,7 @@ export const useAiStore = defineStore('ai', {
       this.messages = []
       this.sessionMeta = null
       this.lastError = ''
+      this.snapshots = []
     },
 
     abort() {
@@ -280,9 +330,155 @@ export const useAiStore = defineStore('ai', {
       if (!this._desktopPath) {
         try { this._desktopPath = await window.api.localDesktop() } catch { /* 忽略 */ }
       }
+      // 命令模式：直译成命令，不走工具循环
+      if (this.cmdMode) return this.translate(text)
       this.lastError = ''
       this.messages.push({ id: newMsgId(), role: 'user', content: text.trim() })
       await this.runLoop()
+    },
+
+    // ---------- 自然语言 → 命令 ----------
+    async translate(text) {
+      const config = useConfigStore()
+      const dialog = useDialogStore()
+      this.lastError = ''
+      const msg = {
+        id: newMsgId(),
+        role: 'assistant',
+        kind: 'cmd',
+        prompt: text.trim(),
+        content: '',
+        cmd: '',
+        executed: false,
+        reasoning: '',
+        model: config.activeProvider.model || '',
+        toolCalls: [],
+        status: 'streaming'
+      }
+      this.messages.push(msg)
+      this.running = true
+      try {
+        const res = await this.streamOnce(config.activeProvider, msg, {
+          messages: [
+            { role: 'system', content: CMD_SYSTEM },
+            { role: 'user', content: text.trim() }
+          ],
+          tools: null
+        })
+        msg.status = 'done'
+        if (res.aborted) msg.content += '\n\n（已停止）'
+        else if (res.error) {
+          this.lastError = res.error
+          if (!msg.content) msg.content = '（请求失败）'
+        } else {
+          // 提取命令：优先代码块，否则整段第一行
+          const m = msg.content.match(/```[a-zA-Z]*\n?([\s\S]*?)```/)
+          const raw = (m ? m[1] : msg.content).trim()
+          msg.cmd = raw.replace(/^[$#]\s*/gm, '').split('\n').filter(Boolean)[0] || ''
+          if (!msg.cmd) this.lastError = 'AI 没有给出有效命令，换个说法试试'
+        }
+      } finally {
+        this.running = false
+        this._activeEventId = null
+      }
+    },
+
+    // 执行 cmd 消息里的命令（复用危险拦截 + 打字机）
+    async executeCmd(msg) {
+      const dialog = useDialogStore()
+      const terminals = useTerminalStore()
+      if (!msg.cmd || !terminals.activeTab || terminals.activeTab.status !== 'connected') {
+        this.lastError = '当前没有已连接的终端，无法执行'
+        return
+      }
+      const { danger, reasons } = checkDanger(msg.cmd)
+      if (danger) {
+        const ok = await dialog.askConfirm({ title: '执行 AI 生成的命令', command: msg.cmd, reasons })
+        if (!ok) return
+        if (this.sessionMeta) this.sessionMeta.hasDanger = true
+      }
+      const typed = await this.typeIntoTerminal(msg.cmd)
+      if (typed) msg.executed = true
+      else dialog.showToast('已中止输入')
+    },
+
+    // ---------- 选中终端输出问 AI（带上下文） ----------
+    async askSelection(selText, screenText, serverName) {
+      if (this.running) {
+        this.lastError = 'AI 正在处理上一条消息，稍等一下'
+        return
+      }
+      const config = useConfigStore()
+      if (!config.activeProvider) {
+        this.lastError = '请先在左下角「实例与 AI 设置」中添加并选择一个 AI 配置'
+        return
+      }
+      this.lastError = ''
+      const text =
+        `我在终端里选中了这段输出（来自 ${serverName}）：\n\`\`\`\n${selText.slice(0, 2000)}\n\`\`\`\n` +
+        (screenText ? `\n当前终端屏幕（供参考）：\n\`\`\`\n${screenText}\n\`\`\`\n` : '') +
+        `请解释这段内容；如果是报错，分析原因并给出修复命令（重大操作会弹窗确认）。`
+      this.messages.push({ id: newMsgId(), role: 'user', content: text })
+      await this.runLoop()
+    },
+
+    // ---------- 快照还原（快照面板入口） ----------
+    async restoreSnapshot(snap) {
+      const dialog = useDialogStore()
+      if (snap.local) {
+        // 本机快照：直接写回
+        const orig = await window.api.localRead(snap.backup)
+        if (!orig.ok) { this.lastError = '备份文件读取失败：' + orig.error; return }
+        const res = await window.api.localWrite(snap.path, orig.content)
+        dialog.showToast(res.ok ? '已还原本机文件：' + snap.path : '还原失败：' + res.error)
+        return
+      }
+      const terminals = useTerminalStore()
+      const tab = terminals.activeTab
+      if (!tab || tab.status !== 'connected') {
+        this.lastError = '请先连接对应服务器再还原'
+        return
+      }
+      const ok = await dialog.askConfirm({
+        title: '还原文件快照',
+        message: `将用备份覆盖现有文件：\n${snap.backup} → ${snap.path}\n（服务器：${snap.server}，请确认当前连接的是该服务器）`
+      })
+      if (!ok) return
+      const res = await window.api.sshExec(tab.id, `cp -a -- ${shQuote(snap.backup)} ${shQuote(snap.path)}`, 15000)
+      if (res.ok) dialog.showToast('已还原：' + snap.path)
+      else this.lastError = '还原失败：' + res.error
+    },
+
+    // ---------- 技能流水线：按步骤执行，检查点暂停确认 ----------
+    async runPipeline(pl) {
+      const dialog = useDialogStore()
+      const config = useConfigStore()
+      if (this.running) {
+        dialog.showToast('AI 正忙，等当前任务结束再跑流水线')
+        return
+      }
+      for (let i = 0; i < pl.steps.length; i++) {
+        const skill = config.skills.find((s) => s.id === pl.steps[i].skillId)
+        if (!skill) {
+          this.lastError = `流水线「${pl.name}」步骤 ${i + 1} 的技能不存在（可能已删除）`
+          return
+        }
+        await this.send(
+          `【流水线「${pl.name}」步骤 ${i + 1}/${pl.steps.length}】请按技能「${skill.name}」执行该步骤的任务，完成后简要汇报结果并停下等我确认。`
+        )
+        if (this.lastError) return
+        if (pl.steps[i].checkpoint !== false) {
+          const ok = await dialog.askConfirm({
+            title: `流水线检查点：步骤 ${i + 1}/${pl.steps.length}`,
+            message: `「${skill.name}」已执行完毕。请检查终端与服务器状态，确认无误后继续。`
+          })
+          if (!ok) {
+            dialog.showToast(`流水线「${pl.name}」已在步骤 ${i + 1} 中止`)
+            return
+          }
+        }
+      }
+      dialog.showToast(`流水线「${pl.name}」全部步骤执行完毕 ✓`)
     },
 
     async runLoop() {
@@ -338,7 +534,7 @@ export const useAiStore = defineStore('ai', {
       }
     },
 
-    streamOnce(provider, msg) {
+    streamOnce(provider, msg, overrides = {}) {
       return new Promise((resolve) => {
         const eventId = `evt_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
         this._activeEventId = eventId
@@ -390,10 +586,11 @@ export const useAiStore = defineStore('ai', {
         }, 330000)
 
         const body = {
-          messages: this.toOpenAiMessages(),
-          tools: TOOLS,
+          messages: overrides.messages || this.toOpenAiMessages(),
           temperature: 0.4
         }
+        // tools: null 表示本轮禁用工具（命令模式）；默认带全量工具
+        if (overrides.tools !== null) body.tools = TOOLS
 
         window.api
           .aiChat({ eventId, provider: JSON.parse(JSON.stringify(provider)), body })
@@ -506,10 +703,23 @@ export const useAiStore = defineStore('ai', {
             reasons: ['本机文件写入：' + args.path]
           })
           if (!ok) return '[已拒绝] 用户取消了写入'
+          // 安全网：覆盖已有文件前先留一份备份（还原走文件管理器手工处理）
+          let bakNote = ''
+          try {
+            const orig = await window.api.localRead(args.path)
+            if (orig.ok) {
+              const bakPath = `${args.path}.laoji-bak-${Date.now()}`
+              const saved = await window.api.localWrite(bakPath, orig.content)
+              if (saved.ok) {
+                this.snapshots.push({ path: args.path, backup: bakPath, time: Date.now(), server: '本机', local: true })
+                bakNote = `\n原文件已自动备份：${bakPath}`
+              }
+            }
+          } catch { /* 备份失败不阻塞写入 */ }
           const res = await window.api.localWrite(args.path, args.content || '')
           if (!res.ok) return '[错误] ' + res.error
           if (this.sessionMeta) this.sessionMeta.hasDanger = true
-          return `已写入本机文件：${args.path}（${(args.content || '').length} 字符）`
+          return `已写入本机文件：${args.path}（${(args.content || '').length} 字符）${bakNote}`
         }
         if (tc.name === 'delete_local') {
           const ok = await dialog.askConfirm({
@@ -541,6 +751,41 @@ export const useAiStore = defineStore('ai', {
           if (!res.ok) return '[错误] 下载失败：' + res.error
           if (this.sessionMeta) this.sessionMeta.hasDanger = true
           return `已下载到本机：${args.localPath}`
+        }
+
+        // ---- 快照类（改配置前的安全网） ----
+        if (tc.name === 'backup_file') {
+          const tab = terminals.activeTab
+          if (!tab || tab.status !== 'connected') return '[错误] 当前没有已连接的服务器，无法备份'
+          const p = String(args.path || '').trim()
+          if (!p) return '[错误] 缺少文件路径'
+          const bak = `${p}.laoji-bak-${Date.now()}`
+          const res = await window.api.sshExec(tab.id, `cp -a -- ${shQuote(p)} ${shQuote(bak)}`, 15000)
+          if (!res.ok) return '[错误] 备份失败：' + res.error
+          this.snapshots.push({ path: p, backup: bak, time: Date.now(), server: tab.name })
+          return `已备份：${p} → ${bak}。现在可以安全修改原文件；撤销时用 restore_file。`
+        }
+        if (tc.name === 'restore_file') {
+          const tab = terminals.activeTab
+          if (!tab || tab.status !== 'connected') return '[错误] 当前没有已连接的服务器，无法还原'
+          const bak = String(args.backupPath || '').trim()
+          const to = String(args.restoreTo || '').trim()
+          if (!bak || !to) return '[错误] 缺少备份路径或还原目标路径'
+          const ok = await dialog.askConfirm({
+            title: 'AI 请求还原文件',
+            message: `将用备份覆盖现有文件（不可恢复现有内容）：\n备份：${bak}\n还原到：${to}`
+          })
+          if (!ok) return '[已拒绝] 用户取消了还原'
+          const res = await window.api.sshExec(tab.id, `cp -a -- ${shQuote(bak)} ${shQuote(to)}`, 15000)
+          if (!res.ok) return '[错误] 还原失败：' + res.error
+          if (this.sessionMeta) this.sessionMeta.hasDanger = true
+          return `已还原：${bak} → ${to}。建议 read_terminal 或读取文件确认还原结果。`
+        }
+        if (tc.name === 'list_snapshots') {
+          if (!this.snapshots.length) return '（本会话还没有文件快照）'
+          return this.snapshots
+            .map((s) => `${new Date(s.time).toLocaleTimeString()} [${s.server}] ${s.path} ← ${s.backup}`)
+            .join('\n')
         }
 
         // ---- 技能类 ----
@@ -604,6 +849,11 @@ export const useAiStore = defineStore('ai', {
     }
   }
 })
+
+// shell 单引号包裹（防注入；POSIX 无单字符转义，用 '"'"' 断接）
+function shQuote(s) {
+  return "'" + String(s).replace(/'/g, "'\\''") + "'"
+}
 
 function formatSize(bytes) {
   if (bytes == null) return ''

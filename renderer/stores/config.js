@@ -7,6 +7,8 @@ export const useConfigStore = defineStore('config', {
     aiProviders: [],
     activeAiProviderId: null,
     skills: [],
+    pipelines: [], // { id, name, steps: [{ skillId, checkpoint }] } 技能流水线
+    recordDir: '', // 会话录制保存目录（空=默认）
     appearance: null,
     runtimeEffect: null, // 当前窗口实际生效的窗口效果（运行时状态，不持久化；改效果选"下次应用"时与 appearance.windowEffect 短暂不一致）
     loaded: false
@@ -24,6 +26,8 @@ export const useConfigStore = defineStore('config', {
       this.aiProviders = cfg.aiProviders || []
       this.activeAiProviderId = cfg.activeAiProviderId || null
       this.skills = cfg.skills || []
+      this.pipelines = cfg.pipelines || []
+      this.recordDir = cfg.recordDir || ''
       this.appearance = cfg.appearance || null
       this.runtimeEffect = this.appearance?.windowEffect || 'none'
       // 自动选中第一个 AI 配置
@@ -38,12 +42,17 @@ export const useConfigStore = defineStore('config', {
         aiProviders: JSON.parse(JSON.stringify(this.aiProviders)),
         activeAiProviderId: this.activeAiProviderId,
         skills: JSON.parse(JSON.stringify(this.skills)),
+        pipelines: JSON.parse(JSON.stringify(this.pipelines)),
+        recordDir: this.recordDir,
         appearance: this.appearance ? JSON.parse(JSON.stringify(this.appearance)) : null,
         seq: Date.now() % 100000
       })
     },
     newInstanceId() {
       return `inst_${Date.now()}_${Math.floor(Math.random() * 1e5)}`
+    },
+    newPipelineId() {
+      return `pl_${Date.now()}_${Math.floor(Math.random() * 1e5)}`
     },
     newProviderId() {
       return `ai_${Date.now()}_${Math.floor(Math.random() * 1e5)}`

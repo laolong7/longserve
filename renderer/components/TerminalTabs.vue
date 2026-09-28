@@ -12,11 +12,30 @@
       >
         <span class="dot" :class="tab.status === 'connected' ? 'on' : tab.status === 'connecting' ? 'mid' : 'off'"></span>
         <span class="tab-name ellipsis">{{ tab.name }}</span>
+        <!-- 连接质量：每 10s 用 no-op 命令测往返，窗口内失败占比近似丢包 -->
+        <span
+          v-if="tab.status === 'connected' && qualityOf(tab)"
+          class="rtt mono"
+          :class="{ bad: qualityOf(tab).rtt == null || qualityOf(tab).loss >= 30, slow: qualityOf(tab).rtt > 300 }"
+          :title="`延迟 ${qualityOf(tab).rtt == null ? '超时' : qualityOf(tab).rtt + 'ms'} · 近 2 分钟丢包约 ${qualityOf(tab).loss}%`"
+        >{{ qualityOf(tab).rtt == null ? '✕' : qualityOf(tab).rtt + 'ms' }}</span>
         <span class="close" title="关闭连接" @click.stop="close(tab)">×</span>
       </div>
     </div>
 
     <div class="actions">
+      <button
+        v-if="store.activeTab && store.activeTab.status === 'connected'"
+        class="ghost"
+        title="查看服务器日志（实时跟随）"
+        @click="emit('open-logs')"
+      >▤ 日志</button>
+      <button
+        v-if="store.activeTab && store.activeTab.status === 'connected'"
+        class="ghost"
+        title="SSH 端口转发（本地 / 远程）"
+        @click="emit('open-tunnels')"
+      >⇄ 隧道</button>
       <button
         v-if="store.activeTab"
         class="ghost"
@@ -32,6 +51,13 @@
       >◫ 并列</button>
       <button
         v-if="store.activeTab && store.activeTab.status === 'connected'"
+        class="ghost rec"
+        :class="{ recording: !!store.recording }"
+        :title="store.recording ? `停止录制并保存（正在录制 ${store.recording.tabName}）` : '录制当前终端会话（asciinema 格式）'"
+        @click="toggleRecord"
+      >{{ store.recording ? '⏺ 录制中' : '⏺ 录制' }}</button>
+      <button
+        v-if="store.activeTab && store.activeTab.status === 'connected'"
         class="ghost"
         title="文件传输（SFTP）"
         @click="emit('open-files')"
@@ -44,9 +70,11 @@
 import { useTerminalStore } from '../stores/terminals'
 import { useDialogStore } from '../stores/dialog'
 
-const emit = defineEmits(['open-files'])
+const emit = defineEmits(['open-files', 'open-logs', 'open-tunnels'])
 const store = useTerminalStore()
 const dialog = useDialogStore()
+
+const qualityOf = store.qualityOf
 
 function duplicate() {
   if (store.activeTab) store.openTab(store.activeTab.instance)
@@ -55,6 +83,18 @@ async function splitView() {
   const r = await store.openSplit()
   if (r === 'max') dialog.showToast('最多只能并列两个终端')
   else if (r === 'none') dialog.showToast('当前没有终端连接')
+}
+async function toggleRecord() {
+  if (store.recording) {
+    const r = await store.stopRecording()
+    if (r.ok) dialog.showToast('已保存：' + r.path)
+    else dialog.showToast(r.error)
+    return
+  }
+  const r = store.startRecording(store.activeTab)
+  if (r === 'ok') dialog.showToast('开始录制终端输出（asciinema 格式）')
+  else if (r === 'busy') dialog.showToast('已有录制在进行')
+  else dialog.showToast('当前没有已连接的终端')
 }
 function close(tab) {
   store.closeTab(tab.id)
@@ -83,7 +123,7 @@ function close(tab) {
   gap: 7px;
   padding: 0 10px 0 12px;
   min-width: 120px;
-  max-width: 200px;
+  max-width: 220px;
   cursor: pointer;
   border-right: 1px solid var(--border);
   color: var(--text-dim);
@@ -96,6 +136,9 @@ function close(tab) {
   box-shadow: inset 0 2px 0 var(--green);
 }
 .tab-name { flex: 1; font-size: 12.5px; }
+.rtt { font-size: 10px; color: var(--text-faint); flex-shrink: 0; }
+.rtt.slow { color: var(--amber); }
+.rtt.bad { color: var(--red); }
 .close {
   width: 16px;
   height: 16px;
@@ -115,6 +158,8 @@ function close(tab) {
   padding: 0 8px;
   border-left: 1px solid var(--border);
 }
-.actions .ghost { font-size: 12px; padding: 4px 9px; }
+.actions .ghost { font-size: 12px; padding: 4px 9px; white-space: nowrap; }
 .actions .ghost.on { color: var(--green); }
+.actions .ghost.rec.recording { color: var(--red); animation: rec-blink 1.4s ease-in-out infinite; }
+@keyframes rec-blink { 50% { opacity: 0.5; } }
 </style>

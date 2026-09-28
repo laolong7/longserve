@@ -2,15 +2,18 @@
   <div class="app-root">
     <TitleBar />
     <div class="app-main">
-      <!-- 左栏：实例列表 -->
+      <!-- 左栏：实例列表 + 监控仪表盘 + 服务面板（后两者可折叠） -->
       <div class="left-col" :style="{ width: leftW + 'px' }">
         <InstanceList @open-files="openFiles" />
+        <MonitorPanel />
+        <SystemdPanel />
+        <button class="ghost settings-foot" @click="openSettings('instances')">⚙ 实例与 AI 设置</button>
       </div>
       <div class="splitter" @mousedown.prevent="startDrag('left', $event)"></div>
 
       <!-- 中栏：终端标签 + 终端 -->
       <div class="center-col">
-        <TerminalTabs @open-files="openFiles" />
+        <TerminalTabs @open-files="openFiles" @open-logs="openLogs" @open-tunnels="openTunnels" />
         <div class="panes" :class="{ 'split-mode': !!store.split }" v-if="store.tabs.length">
           <TerminalPane
             v-for="tab in store.tabs"
@@ -42,6 +45,8 @@
     <FileTransferDialog ref="filesRef" />
     <HistoryDialog ref="historyRef" />
     <AboutDialog ref="aboutRef" />
+    <TunnelDialog ref="tunnelsRef" />
+    <LogViewer ref="logsRef" />
   </div>
 </template>
 
@@ -49,6 +54,8 @@
 import { ref, onMounted, provide, watch } from 'vue'
 import TitleBar from './components/TitleBar.vue'
 import InstanceList from './components/InstanceList.vue'
+import MonitorPanel from './components/MonitorPanel.vue'
+import SystemdPanel from './components/SystemdPanel.vue'
 import TerminalTabs from './components/TerminalTabs.vue'
 import TerminalPane from './components/TerminalPane.vue'
 import AiChat from './components/AiChat.vue'
@@ -57,6 +64,8 @@ import SettingsDialog from './components/SettingsDialog.vue'
 import FileTransferDialog from './components/FileTransferDialog.vue'
 import HistoryDialog from './components/HistoryDialog.vue'
 import AboutDialog from './components/AboutDialog.vue'
+import TunnelDialog from './components/TunnelDialog.vue'
+import LogViewer from './components/LogViewer.vue'
 import { useConfigStore } from './stores/config'
 import { useTerminalStore } from './stores/terminals'
 import { applyAppearance } from './utils/appearance'
@@ -68,11 +77,15 @@ const settingsRef = ref(null)
 const filesRef = ref(null)
 const historyRef = ref(null)
 const aboutRef = ref(null)
+const tunnelsRef = ref(null)
+const logsRef = ref(null)
 // action: { type:'new-instance' } | { type:'edit-instance', id } | undefined
 const openSettings = (tabName, action) => settingsRef.value?.open(tabName, action)
 const openFiles = () => filesRef.value?.open()
 const openHistory = () => historyRef.value?.open()
 const openAbout = () => aboutRef.value?.open()
+const openTunnels = () => tunnelsRef.value?.open(store.activeTab)
+const openLogs = () => logsRef.value?.open()
 provide('openSettings', openSettings)
 provide('openAbout', openAbout)
 
@@ -159,4 +172,12 @@ function startDrag(side, e) {
   transition: background 0.15s;
 }
 .splitter:hover { background: var(--blue-dim); }
+.settings-foot {
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  text-align: left;
+  padding: 9px 12px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
 </style>

@@ -1,15 +1,20 @@
 // 终端标签 store：多开连接、激活切换、断线重连
 // TerminalPane 组件把自己注册进 paneRefs，供 AI 读写当前终端
+// 扩展：连接质量缓存（conn:quality 事件）、会话录制（asciinema v2）
 import { defineStore } from 'pinia'
+import { useConfigStore } from './config'
 
 let uidSeq = 0 // tab 稳定 uid：pending -> conn_ 的 id 变化不影响 v-for key
+const qualityUnsubs = new Map() // connId -> 解绑函数（非响应式）
 
 export const useTerminalStore = defineStore('terminals', {
   state: () => ({
     tabs: [], // { id(connId), instanceId, name, status: connecting|connected|closed, instance快照 }
     activeTabId: null,
     paneRefs: new Map(), // tab 对象引用 -> { term, readScreen }（用对象引用做 key，重连换 id 也不失效）
-    split: null // 并列模式：{ top, bottom } 两个 tab 对象引用上下各占 1/2（存引用不存 id，重连换 id 不失效）
+    split: null, // 并列模式：{ top, bottom } 两个 tab 对象引用上下各占 1/2（存引用不存 id，重连换 id 不失效）
+    quality: new Map(), // connId -> { ok, rtt, loss }（标签栏延迟/丢包显示）
+    recording: null // { connId, tabName, startedAt, buffer: [{t, s}] } 会话录制状态
   }),
   getters: {
     activeTab(state) {
@@ -24,6 +29,9 @@ export const useTerminalStore = defineStore('terminals', {
         state.split
           ? tab === state.split.top || tab === state.split.bottom
           : tab.id === state.activeTabId
+    },
+    qualityOf(state) {
+      return (connId) => state.quality.get(connId) || null
     }
   },
   actions: {
@@ -88,6 +96,20 @@ export const useTerminalStore = defineStore('terminals', {
       tab.error = null
       tab.__retryCount = 0 // 连上了就清零自动重连计数
       if (this.activeTabId === oldId) this.activeTabId = res.connId
+      this.watchQuality(res.connId)
+    },
+
+    // 订阅连接质量事件（重复调用幂等；重连换 id 后旧订阅随连接关闭自动失效）
+    watchQuality(connId) {
+      if (qualityUnsubs.has(connId)) return
+      const unsub = window.api.on(`conn:quality:${connId}`, (q) => {
+        this.quality.set(connId, q)
+        if (q.offline) {
+          const u = qualityUnsubs.get(connId)
+          if (u) { u(); qualityUnsubs.delete(connId) }
+        }
+      })
+      qualityUnsubs.set(connId, unsub)
     },
 
     // 断线重连（接受 tab 对象引用，重连后 tab.id 会被替换为新 connId）
@@ -120,6 +142,10 @@ export const useTerminalStore = defineStore('terminals', {
       // 关掉的是并列格之一：退出并列，另一个恢复全屏
       if (this.split && (tab === this.split.top || tab === this.split.bottom)) {
         this.split = null
+      }
+      // 关闭的是录制目标连接：先停录（不落盘没有意义，丢弃数据）
+      if (this.recording && this.recording.connId === tab.id) {
+        this.recording = null
       }
       this.paneRefs.delete(tab)
       this.tabs.splice(idx, 1)
@@ -156,6 +182,54 @@ export const useTerminalStore = defineStore('terminals', {
       const tab = this.activeTab
       if (!tab || !tab.id.startsWith('conn_')) throw new Error('当前没有已连接的终端')
       window.api.sshWrite(tab.id, data)
+    },
+
+    // ---------- 会话录制（asciinema v2） ----------
+    startRecording(tab) {
+      if (this.recording) return 'busy'
+      if (!tab || !tab.id.startsWith('conn_')) return 'none'
+      this.recording = {
+        connId: tab.id,
+        tabName: tab.name,
+        startedAt: Date.now(),
+        cols: 120,
+        rows: 30,
+        buffer: []
+      }
+      return 'ok'
+    },
+
+    // TerminalPane 数据回调里调用；只录开始时指定的连接
+    recordChunk(connId, u8) {
+      const rec = this.recording
+      if (!rec || rec.connId !== connId) return
+      const text = new TextDecoder('utf8').decode(u8)
+      if (text) rec.buffer.push({ t: (Date.now() - rec.startedAt) / 1000, s: text })
+    },
+
+    // 停止并落盘为 .cast 文件；返回 { ok, path?, error? }
+    async stopRecording() {
+      const rec = this.recording
+      if (!rec) return { ok: false, error: '没有进行中的录制' }
+      this.recording = null
+      if (!rec.buffer.length) return { ok: false, error: '录制内容为空（期间无终端输出）' }
+      const config = useConfigStore()
+      let dir = config.recordDir
+      if (!dir) {
+        try { dir = await window.api.recordingsDefaultDir() } catch { dir = '' }
+        if (!dir) return { ok: false, error: '拿不到录制保存目录，请到设置→数据里指定' }
+      }
+      const d = new Date(rec.startedAt)
+      const p = (n) => String(n).padStart(2, '0')
+      const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+      const safeName = (rec.tabName || 'session').replace(/[\\/:*?"<>|]/g, '_')
+      const filePath = (dir.replace(/[\\/]+$/, '')) + '\\' + `${safeName}_${stamp}.cast`
+      // asciinema v2：首行元信息，其后每行 [相对秒, "o", 文本]
+      const header = JSON.stringify({ version: 2, width: rec.cols, height: rec.rows, timestamp: Math.floor(rec.startedAt / 1000), title: rec.tabName })
+      const body = rec.buffer.map((c) => JSON.stringify([Number(c.t.toFixed(3)), 'o', c.s])).join('\n')
+      const res = await window.api.localWrite(filePath, header + '\n' + body + '\n')
+      if (!res.ok) return { ok: false, error: '保存失败：' + res.error }
+      return { ok: true, path: filePath }
     }
   }
 })

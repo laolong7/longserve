@@ -96,6 +96,8 @@ function defaults() {
     aiProviders: [],        // { id, name, baseUrl, apiKey, model }
     activeAiProviderId: null,
     skills: [],             // { id, name, description, content, enabled }
+    pipelines: [],          // { id, name, steps: [{ skillId, checkpoint }] } 技能流水线
+    recordDir: '',          // 会话录制保存目录（空=默认 userData/recordings）
     appearance: null,       // { accent, text, bgHue, bgAlpha } null=默认主题
     seq: 0                  // id 生成计数器
   }
@@ -106,6 +108,8 @@ function normalize(raw) {
   if (!Array.isArray(cfg.instances)) cfg.instances = []
   if (!Array.isArray(cfg.aiProviders)) cfg.aiProviders = []
   if (!Array.isArray(cfg.skills)) cfg.skills = []
+  if (!Array.isArray(cfg.pipelines)) cfg.pipelines = []
+  if (typeof cfg.recordDir !== 'string') cfg.recordDir = ''
   if (!cfg.appearance || typeof cfg.appearance !== 'object') cfg.appearance = null
   // 实例字段补全
   for (const inst of cfg.instances) {

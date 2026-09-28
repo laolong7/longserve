@@ -1,6 +1,36 @@
 <template>
-  <div class="pane-wrap" v-show="visible" @mousedown="store.setActive(tab.id)">
+  <div
+    class="pane-wrap"
+    v-show="visible"
+    @mousedown="store.setActive(tab.id)"
+    @dragover.prevent
+    @drop.prevent="onDrop"
+  >
     <div ref="hostEl" class="term-host"></div>
+
+    <!-- Ctrl+F 搜索条 -->
+    <div v-if="searchOpen" class="search-bar" @mousedown.stop>
+      <input
+        ref="searchInputEl"
+        v-model="searchText"
+        placeholder="搜索终端内容…（Enter 下一个）"
+        @keydown.enter.prevent="doSearch(1)"
+        @keydown.esc="closeSearch"
+      />
+      <span class="mono faint s-info">{{ searchInfo }}</span>
+      <button class="ghost" title="上一个" @click="doSearch(-1)">↑</button>
+      <button class="ghost" title="下一个" @click="doSearch(1)">↓</button>
+      <button class="ghost" title="关闭 (Esc)" @click="closeSearch">✕</button>
+    </div>
+
+    <!-- 选中文字浮动按钮：一键带上下文问 AI -->
+    <button v-if="hasSelection" class="ask-ai" @mousedown.stop @click="askAi">✦ 问 AI</button>
+
+    <!-- 拖拽文件上传进度 -->
+    <div v-if="upload" class="drop-upload">
+      <div class="du-text">↑ {{ upload.name }} → {{ upload.to }}</div>
+      <div class="du-bar"><div class="du-bar-in" :style="{ width: upload.pct + '%' }"></div></div>
+    </div>
 
     <!-- 连接中 / 断线覆盖层 -->
     <div v-if="tab.status !== 'connected'" class="pane-overlay">
@@ -30,9 +60,12 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { SearchAddon } from '@xterm/addon-search'
 import '@xterm/xterm/css/xterm.css'
 import { useTerminalStore } from '../stores/terminals'
 import { useConfigStore } from '../stores/config'
+import { useAiStore } from '../stores/ai'
+import { useDialogStore } from '../stores/dialog'
 import { getTermTheme } from '../utils/appearance'
 
 const props = defineProps({
@@ -42,14 +75,102 @@ const props = defineProps({
 
 const store = useTerminalStore()
 const config = useConfigStore()
+const ai = useAiStore()
+const dialog = useDialogStore()
 const hostEl = ref(null)
 
 let term = null
 let fitAddon = null
+let searchAddon = null
 let resizeObserver = null
 let unsubData = null
 let unsubClose = null
 let unsubStage = null
+
+// ---------- 搜索（Ctrl+F） ----------
+const searchOpen = ref(false)
+const searchText = ref('')
+const searchInfo = ref('')
+const searchInputEl = ref(null)
+// ---------- 选中问 AI ----------
+const hasSelection = ref(false)
+// ---------- 拖拽上传 ----------
+const upload = ref(null) // { name, to, pct, taskId }
+
+function openSearch() {
+  searchOpen.value = true
+  nextTick(() => { searchInputEl.value?.focus(); searchInputEl.value?.select() })
+}
+function closeSearch() {
+  searchOpen.value = false
+  searchAddon?.clearDecorations()
+  term?.focus()
+}
+function doSearch(dir) {
+  if (!searchAddon || !searchText.value) return
+  const opts = { decorations: { matchOverviewRuler: '#a78bfa', activeMatchColorOverviewRuler: '#3fdc97' } }
+  if (dir > 0) searchAddon.findNext(searchText.value, opts)
+  else searchAddon.findPrevious(searchText.value, opts)
+}
+function bindSearchEvents() {
+  searchAddon.onDidChangeResults((r) => {
+    searchInfo.value = r.resultCount ? `${r.resultIndex + 1}/${r.resultCount}` : (searchText.value ? '无结果' : '')
+  })
+}
+
+// ---------- 选中问 AI ----------
+function askAi() {
+  const sel = term && term.hasSelection() ? term.getSelection() : ''
+  term && term.clearSelection()
+  if (!sel.trim()) return
+  const screen = term ? term.buffer.active : null
+  let screenText = ''
+  if (screen) {
+    const rows = []
+    for (let y = Math.max(0, screen.length - 30); y < screen.length; y++) {
+      const l = screen.getLine(y)
+      rows.push(l ? l.translateToString(true) : '')
+    }
+    screenText = rows.join('\n').slice(0, 1500)
+  }
+  ai.askSelection(sel, screenText, `${tab.value.instance.username}@${tab.value.instance.host}`)
+    .catch((e) => dialog.showToast('发送失败：' + e.message))
+}
+
+// ---------- 拖拽本地文件上传 ----------
+async function onDrop(e) {
+  const tabv = props.tab
+  if (!tabv.id.startsWith('conn_')) return
+  const files = [...(e.dataTransfer?.files || [])]
+  const paths = files.map((f) => window.api.filePathForDrop(f)).filter(Boolean)
+  if (!paths.length) return
+  const home = await window.api.sftpHome(tabv.id)
+  const to = await dialog.askInput({
+    title: `上传 ${paths.length} 个文件到服务器`,
+    value: home.ok ? home.path : '/root/'
+  })
+  if (!to || !to.trim()) return
+  const dest = to.trim().replace(/\/+$/, '') + '/'
+  for (const p of paths) {
+    const name = p.replace(/^.*[\\/]/, '')
+    const taskId = window.api.sftpNewTaskId()
+    upload.value = { name, to: dest, pct: 0, taskId }
+    const unsubP = window.api.on(`sftp:progress:${taskId}`, (prog) => {
+      if (upload.value && upload.value.taskId === taskId && prog.phase === 'transferring') {
+        upload.value.pct = prog.percent
+      }
+    })
+    try {
+      const res = await window.api.sftpTransfer({
+        connId: tabv.id, taskId, direction: 'upload', localPath: p, remotePath: dest + name
+      })
+      dialog.showToast(res.ok ? `已上传 ${name} → ${dest}` : `上传 ${name} 失败：` + res.error)
+    } finally {
+      unsubP()
+      if (upload.value && upload.value.taskId === taskId) upload.value = null
+    }
+  }
+}
 // 连接阶段日志（ssh2 真实事件流，连接动画里滚动展示）
 const connLog = ref([])
 let lastConnId = null
@@ -150,6 +271,7 @@ function bindConn(connId) {
       const u8 = toU8(data)
       term.write(u8)
       ringPush(u8)
+      store.recordChunk(connId, u8) // 会话录制（未录制时是空操作）
     })
     unsubClose = window.api.on(`term:close:${connId}`, (info) => {
       // 同步 store 状态（此前断线后 status 卡在 connected 的 bug）
@@ -231,6 +353,19 @@ onMounted(() => {
   })
   fitAddon = new FitAddon()
   term.loadAddon(fitAddon)
+  searchAddon = new SearchAddon()
+  term.loadAddon(searchAddon)
+  bindSearchEvents()
+  // Ctrl+F 打开搜索（拦住不让字符进终端）
+  term.attachCustomKeyEventHandler((e) => {
+    if (e.type === 'keydown' && (e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'f') {
+      openSearch()
+      return false
+    }
+    return true
+  })
+  // 有选中文字时显示"问 AI"浮钮
+  term.onSelectionChange(() => { hasSelection.value = !!(term && term.hasSelection()) })
   term.open(hostEl.value)
   fit()
 
@@ -268,6 +403,9 @@ onBeforeUnmount(() => {
   if (resizeObserver) resizeObserver.disconnect()
   if (term) term.dispose()
 })
+
+// props.tab 在模板/script 里都要用（askAi / onDrop 引用实例数据）
+const tab = computed(() => props.tab)
 </script>
 
 <style scoped>
@@ -277,6 +415,54 @@ onBeforeUnmount(() => {
   background: var(--bg0);
 }
 .term-host { height: 100%; padding: 4px 6px 2px; }
+/* Ctrl+F 搜索条：右上角浮层 */
+.search-bar {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--bg2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  z-index: 20;
+}
+.search-bar input { width: 170px; font-size: 12px; padding: 3px 8px; }
+.search-bar .ghost { font-size: 11px; padding: 2px 7px; }
+.s-info { font-size: 11px; min-width: 40px; }
+/* 选中文字后的"问 AI"浮钮 */
+.ask-ai {
+  position: absolute;
+  right: 16px;
+  bottom: 18px;
+  background: var(--violet-dim);
+  border: 1px solid rgba(167, 139, 250, 0.45);
+  color: var(--violet);
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 14px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  z-index: 20;
+}
+.ask-ai:hover { background: rgba(167, 139, 250, 0.25); }
+/* 拖拽上传进度浮条 */
+.drop-upload {
+  position: absolute;
+  right: 12px;
+  bottom: 14px;
+  width: 240px;
+  background: var(--bg2);
+  border: 1px solid rgba(63, 220, 151, 0.45);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  z-index: 20;
+}
+.du-text { font-size: 11.5px; color: var(--green); margin-bottom: 5px; word-break: break-all; }
+.du-bar { height: 5px; background: var(--bg0); border-radius: 3px; overflow: hidden; }
+.du-bar-in { height: 100%; background: var(--green); transition: width 0.2s; }
 .pane-overlay {
   position: absolute;
   inset: 0;

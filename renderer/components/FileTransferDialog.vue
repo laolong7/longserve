@@ -323,6 +323,12 @@ function bindProgress(task) {
 }
 
 async function runTransfer(direction, items) {
+  // 下载目标必须是真实目录："此电脑"盘符视图没有落盘目录，历史版本会静默
+  // 写到相对路径 __drives__\ 下（进度显示完成但找不到文件），这里直接拦住
+  if (direction === 'download' && local.dir === '__drives__') {
+    alert('请先在左侧进入一个具体的本机文件夹（如 D:\\downloads），再点下载')
+    return
+  }
   // 二次确认：明确列出传什么、传到哪
   const names = items.map((i) => i.name)
   const listText = names.length <= 5 ? names.join('、') : names.slice(0, 5).join('、') + ` 等 ${names.length} 项`
@@ -330,7 +336,7 @@ async function runTransfer(direction, items) {
     title: direction === 'upload' ? '确认上传' : '确认下载',
     message: direction === 'upload'
       ? `将 ${listText} 上传到服务器目录：\n${remote.dir}`
-      : `将 ${listText} 下载到本机目录：\n${local.dir}`
+      : `将 ${listText} 下载到本机目录：\n${local.dir}${local.dir.endsWith('\\') || local.dir.endsWith('/') ? '' : '\\'}（${items.length === 1 ? items[0].name : items.length + ' 个文件'}）`
   })
   if (!ok) return
 

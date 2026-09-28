@@ -6,6 +6,7 @@
           <div class="set-tab" :class="{ on: tab === 'instances' }" @click="switchTab('instances')">服务器实例</div>
           <div class="set-tab" :class="{ on: tab === 'ai' }" @click="switchTab('ai')">AI 配置</div>
           <div class="set-tab" :class="{ on: tab === 'skills' }" @click="switchTab('skills')">AI 技能</div>
+          <div class="set-tab" :class="{ on: tab === 'pipelines' }" @click="switchTab('pipelines')">流水线</div>
           <div class="set-tab" :class="{ on: tab === 'appearance' }" @click="switchTab('appearance')">外观</div>
           <div class="set-tab" :class="{ on: tab === 'data' }" @click="switchTab('data')">数据</div>
           <div class="grow"></div>
@@ -132,6 +133,62 @@
           </div>
         </div>
 
+        <!-- ================= 流水线 ================= -->
+        <div v-else-if="tab === 'pipelines'" class="set-body">
+          <div class="side-list">
+            <button class="primary" style="width:100%" @click="newPipeline">＋ 新建流水线</button>
+            <div class="side-items">
+              <div
+                v-for="p in config.pipelines"
+                :key="p.id"
+                class="side-item"
+                :class="{ on: editingId === p.id }"
+                @click="startEditPipeline(p)"
+              >
+                <span class="ellipsis">{{ p.name }}</span>
+                <span class="faint" style="font-size:10.5px">{{ p.steps.length }} 个步骤</span>
+              </div>
+            </div>
+          </div>
+          <div class="form-panel">
+            <template v-if="form">
+              <div class="form-row">
+                <label>流水线名称</label>
+                <input v-model="form.name" placeholder="如：部署学生急事通全流程" />
+              </div>
+              <div class="form-row">
+                <label>步骤（从上到下依次执行，勾选"检查点"的步骤完成后暂停等你确认）</label>
+                <div class="pl-steps">
+                  <div v-for="(st, i) in form.steps" :key="i" class="pl-step">
+                    <span class="mono faint pl-idx">{{ i + 1 }}</span>
+                    <select v-model="st.skillId" class="grow">
+                      <option value="" disabled>选择技能…</option>
+                      <option v-for="s in config.skills" :key="s.id" :value="s.id">{{ s.name }}</option>
+                    </select>
+                    <label class="pl-ck" title="完成后暂停等待人工确认">
+                      <input type="checkbox" v-model="st.checkpoint" style="width:auto" />检查点
+                    </label>
+                    <button class="ghost" title="上移" :disabled="i === 0" @click="moveStep(i, -1)">↑</button>
+                    <button class="ghost" title="下移" :disabled="i === form.steps.length - 1" @click="moveStep(i, 1)">↓</button>
+                    <button class="ghost" title="移除" @click="form.steps.splice(i, 1)">✕</button>
+                  </div>
+                  <button class="ghost" style="width:100%" @click="form.steps.push({ skillId: '', checkpoint: true })">＋ 添加步骤</button>
+                </div>
+              </div>
+              <div class="form-actions">
+                <button class="danger" v-if="editingId" @click="removePipelineCurrent">删除</button>
+                <div class="grow"></div>
+                <button class="primary" @click="savePipeline">保存</button>
+              </div>
+            </template>
+            <div v-else class="empty-hint">
+              <div class="big">▶</div>
+              <div>把多个技能串成带检查点的流水线</div>
+              <div class="faint">在 AI 副驾里点 ▶ 一键按步骤执行</div>
+            </div>
+          </div>
+        </div>
+
         <!-- ================= 外观 ================= -->
         <div v-else-if="tab === 'appearance'" class="set-body">
           <div class="form-panel" style="max-width: 560px">
@@ -225,6 +282,14 @@
               <div class="faint" style="font-size:12px; line-height:1.7">
                 数据独立于 exe 保存，删除软件不会丢数据。<br>
                 更换位置会把全部数据（含加密密钥）拷贝到新目录并重启应用；换电脑时拷贝数据文件夹即可迁移。
+              </div>
+            </div>
+            <div class="form-row">
+              <label>会话录制保存位置（asciinema .cast 格式，可在终端标签栏点「⏺ 录制」启停）</label>
+              <div class="mono" style="word-break:break-all; background:var(--bg2); padding:8px 10px; border-radius:6px; font-size:12px">{{ recordDirShown }}</div>
+              <div style="display:flex; gap:8px">
+                <button @click="changeRecordDir">更改位置…</button>
+                <button class="ghost" @click="resetRecordDir">恢复默认</button>
               </div>
             </div>
             <div class="form-actions">
@@ -453,8 +518,23 @@ function resetAppearance() {
 
 // ---------- 数据目录 ----------
 const dataDir = ref('（读取中…）')
+const recordDirShown = ref('（读取中…）')
 async function refreshDataDir() {
   try { dataDir.value = await window.api.dataDir() } catch { dataDir.value = '（获取失败）' }
+  recordDirShown.value = config.recordDir || (await window.api.recordingsDefaultDir().catch(() => '')) + '（默认）'
+}
+async function changeRecordDir() {
+  const v = await dialog.askInput({ title: '录制保存目录（绝对路径）', value: config.recordDir || (await window.api.recordingsDefaultDir().catch(() => '')) })
+  if (!v || !v.trim()) return
+  config.recordDir = v.trim()
+  await config.save()
+  recordDirShown.value = config.recordDir
+  dialog.showToast('录制保存位置已更新')
+}
+async function resetRecordDir() {
+  config.recordDir = ''
+  await config.save()
+  recordDirShown.value = (await window.api.recordingsDefaultDir().catch(() => '')) + '（默认）'
 }
 async function openDataDir() {
   await window.api.dataOpen()
@@ -478,6 +558,49 @@ function newSkill() {
 function startEditSkill(s) {
   editingId.value = s.id
   form.value = { ...s }
+}
+
+// ---------- 流水线 ----------
+function newPipeline() {
+  editingId.value = null
+  form.value = { id: null, name: '', steps: [] }
+}
+function startEditPipeline(p) {
+  editingId.value = p.id
+  form.value = JSON.parse(JSON.stringify({ ...p, steps: p.steps.length ? p.steps : [] }))
+}
+function moveStep(i, dir) {
+  const steps = form.value.steps
+  const j = i + dir
+  if (j < 0 || j >= steps.length) return
+  ;[steps[i], steps[j]] = [steps[j], steps[i]]
+}
+async function savePipeline() {
+  const f = form.value
+  if (!f.name || !f.name.trim()) return alert('流水线名称不能为空')
+  const steps = f.steps.filter((s) => s.skillId)
+  if (!steps.length) return alert('至少添加一个步骤并选择技能')
+  const data = {
+    id: f.id || config.newPipelineId(),
+    name: f.name.trim(),
+    steps: steps.map((s) => ({ skillId: s.skillId, checkpoint: s.checkpoint !== false }))
+  }
+  const idx = config.pipelines.findIndex((p) => p.id === data.id)
+  if (idx >= 0) config.pipelines[idx] = data
+  else config.pipelines.push(data)
+  await config.save()
+  dialog.showToast('流水线已保存')
+  form.value = null
+  editingId.value = null
+}
+async function removePipelineCurrent() {
+  const id = editingId.value
+  if (!id) return
+  if (!confirm('确定删除该流水线？')) return
+  config.pipelines = config.pipelines.filter((p) => p.id !== id)
+  await config.save()
+  form.value = null
+  editingId.value = null
 }
 async function saveSkill() {
   const f = form.value
@@ -743,6 +866,11 @@ async function fetchModels() {
 .form-panel { flex: 1; padding: 18px 20px; overflow-y: auto; }
 .form-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .form-actions { display: flex; gap: 8px; margin-top: 6px; }
+.pl-steps { display: flex; flex-direction: column; gap: 6px; }
+.pl-step { display: flex; align-items: center; gap: 6px; }
+.pl-step .ghost { font-size: 11px; padding: 3px 8px; }
+.pl-idx { width: 16px; text-align: right; flex-shrink: 0; font-size: 11px; }
+.pl-ck { display: flex; align-items: center; gap: 3px; font-size: 11px; cursor: pointer; flex-shrink: 0; white-space: nowrap; color: var(--text-dim); }
 .preset-card {
   display: flex;
   align-items: center;

@@ -14,6 +14,13 @@ const aiProxy = require('./ai-proxy')
 let sshManager = null
 let sftpManager = null
 
+// 冒烟/并行开发隔离：SMOKE_USER_DATA=1 时用一次性临时 userData，
+// 避免与正式应用抢单实例锁和数据目录（正常启动不设置此变量，零影响）
+if (process.env.SMOKE_USER_DATA) {
+  const os = require('os')
+  app.setPath('userData', path.join(os.tmpdir(), 'laoji-smoke-' + Date.now()))
+}
+
 // 单实例锁：防止双开导致配置与连接混乱
 if (!app.requestSingleInstanceLock()) {
   app.quit()
@@ -136,6 +143,33 @@ function registerIpc() {
     } catch (err) {
       return { ok: false, error: err.message }
     }
+  })
+  // 命令通道：监控采样 / systemd 服务管理 / AI 快照等（结果收集式）
+  ipcMain.handle('ssh:exec', async (_e, connId, cmd, timeout) => {
+    try { return { ok: true, ...(await sshManager.exec(connId, cmd, timeout || 10000)) } }
+    catch (err) { return { ok: false, error: err.message } }
+  })
+  // 日志流：tail -F 持续跟随（文件被轮转也能续上）
+  ipcMain.handle('log:start', async (_e, connId, file) => {
+    const quoted = "'" + String(file).replace(/'/g, "'\\''") + "'"
+    try { return { ok: true, ...(await sshManager.execStream(connId, 'tail -n 200 -F -- ' + quoted)) } }
+    catch (err) { return { ok: false, error: err.message } }
+  })
+  ipcMain.on('log:stop', (_e, streamId) => sshManager.stopStream(streamId))
+
+  // ---------- 端口转发 ----------
+  ipcMain.handle('tunnel:add', async (_e, connId, spec) => {
+    try { return { ok: true, ...(await sshManager.addTunnel(connId, spec)) } }
+    catch (err) { return { ok: false, error: err.message } }
+  })
+  ipcMain.on('tunnel:stop', (_e, tunnelId) => sshManager.stopTunnel(tunnelId))
+  ipcMain.handle('tunnel:list', (_e, connId) => sshManager.listTunnels(connId))
+
+  // ---------- 会话录制 ----------
+  ipcMain.handle('recordings:default-dir', () => {
+    const dir = path.join(app.getPath('userData'), 'recordings')
+    try { fs.mkdirSync(dir, { recursive: true }) } catch { /* 目录建不上则首次保存时报错 */ }
+    return dir
   })
 
   // ---------- SFTP ----------

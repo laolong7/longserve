@@ -123,6 +123,11 @@ class SftpManager {
   // onProgress: ({ taskId, phase, percent, transferred, total, currentFile, filesDone, filesTotal })
   async transfer(opts, onProgress) {
     const { connId, taskId, direction, localPath, remotePath } = opts
+    // 防御：下载落盘路径必须是绝对路径。历史版本曾把"此电脑"视图的哨兵目录
+    // 拼成相对路径 __drives__\xx，文件静默写进运行目录导致"下载后找不到文件"
+    if (direction === 'download' && !path.isAbsolute(localPath)) {
+      throw new Error('下载目标必须是本机绝对路径（收到：' + localPath + '）')
+    }
     const sftp = await this.requestSftp(connId)
 
     // 收集要传的文件清单：文件直接一条，文件夹递归展开

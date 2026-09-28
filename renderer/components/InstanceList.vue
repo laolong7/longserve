@@ -28,12 +28,6 @@
       </div>
     </div>
 
-    <div class="col-foot">
-      <button class="ghost" style="width:100%; text-align:left" @click="openSettings('instances')">
-        ⚙ 实例与 AI 设置
-      </button>
-    </div>
-
     <!-- 右键菜单 -->
     <Teleport to="body">
       <div v-if="menu.visible" class="ctx-mask" @click="menu.visible = false" @contextmenu.prevent="menu.visible = false">
@@ -117,7 +111,7 @@ async function removeInstance(inst) {
 </script>
 
 <style scoped>
-.inst-list { display: flex; flex-direction: column; height: 100%; }
+.inst-list { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .col-head {
   display: flex;
   align-items: center;

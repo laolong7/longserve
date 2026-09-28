@@ -5,7 +5,7 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
 // 允许订阅的事件通道白名单（前缀匹配）
-const EVENT_PREFIXES = ['term:data:', 'term:close:', 'conn:stage:', 'sftp:progress:', 'ai:delta:', 'ai:done:', 'ai:error:']
+const EVENT_PREFIXES = ['term:data:', 'term:close:', 'conn:stage:', 'sftp:progress:', 'ai:delta:', 'ai:done:', 'ai:error:', 'log:data:', 'log:close:', 'conn:quality:', 'tunnel:stopped']
 
 function isAllowedChannel(ch) {
   return EVENT_PREFIXES.some((p) => ch.startsWith(p))
@@ -27,6 +27,15 @@ contextBridge.exposeInMainWorld('api', {
   sshResize: (connId, rows, cols) => ipcRenderer.send('ssh:resize', connId, rows, cols),
   sshClose: (connId) => ipcRenderer.invoke('ssh:close', connId),
   sshReconnect: (connId, instance) => ipcRenderer.invoke('ssh:reconnect', connId, instance),
+  sshExec: (connId, cmd, timeout) => ipcRenderer.invoke('ssh:exec', connId, cmd, timeout),
+
+  // ---------- 日志流 / 端口转发 / 录制 ----------
+  logStart: (connId, file) => ipcRenderer.invoke('log:start', connId, file),
+  logStop: (streamId) => ipcRenderer.send('log:stop', streamId),
+  tunnelAdd: (connId, spec) => ipcRenderer.invoke('tunnel:add', connId, spec),
+  tunnelStop: (tunnelId) => ipcRenderer.send('tunnel:stop', tunnelId),
+  tunnelList: (connId) => ipcRenderer.invoke('tunnel:list', connId),
+  recordingsDefaultDir: () => ipcRenderer.invoke('recordings:default-dir'),
 
   // ---------- SFTP ----------
   sftpHome: (connId) => ipcRenderer.invoke('sftp:home', connId),

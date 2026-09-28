@@ -15,6 +15,8 @@
           {{ p.name }}
         </option>
       </select>
+      <button class="ghost icon-sm" title="本会话文件快照（AI 改动安全网）" @click="showSnapshots">⟲</button>
+      <button class="ghost icon-sm" title="运行技能流水线" @click="runPipeline">▶</button>
       <button class="ghost icon-sm" title="历史会话记录" @click="emit('open-history')">📜</button>
       <button class="ghost icon-sm" title="清空对话" :disabled="ai.running" @click="ai.clear()">🗑</button>
     </div>
@@ -33,6 +35,24 @@
         <!-- 用户消息 -->
         <div v-if="m.role === 'user'" class="msg user selectable">
           <div class="bubble user-bubble">{{ m.content }}</div>
+        </div>
+
+        <!-- 命令模式消息：自然语言直译的命令卡片 -->
+        <div v-else-if="m.kind === 'cmd'" class="msg assistant">
+          <div class="assistant-tag">{{ m.model || 'AI' }}</div>
+          <div class="bubble ai-bubble selectable">
+            <div class="cmd-q faint">「{{ m.prompt }}」</div>
+            <template v-if="m.cmd">
+              <div class="cmd-out mono selectable">{{ m.cmd }}</div>
+              <div class="cmd-foot">
+                <button v-if="!m.executed" class="primary" @click="ai.executeCmd(m)">▶ 在终端执行</button>
+                <span v-else class="faint" style="font-size:11px">✓ 已输入终端执行</span>
+                <span class="faint" style="font-size:11px">危险命令会先弹窗确认</span>
+              </div>
+            </template>
+            <div v-else-if="m.status === 'done'" class="faint" style="font-size:12px">{{ m.content || '（没有给出命令）' }}</div>
+            <span v-if="m.status === 'streaming'" class="caret"></span>
+          </div>
         </div>
 
         <!-- AI 消息 -->
@@ -86,15 +106,24 @@
 
     <!-- 输入区 -->
     <div class="ai-input-wrap">
+      <div class="mode-row">
+        <button
+          class="mode-pill"
+          :class="{ on: ai.cmdMode }"
+          title="命令模式：输入自然语言，AI 直译成一条命令（不走工具、可一键执行）"
+          @click="ai.cmdMode = !ai.cmdMode"
+        >⚡ 命令模式</button>
+        <span class="faint" style="font-size:10.5px">{{ ai.cmdMode ? '描述你想做的事，AI 只给一条命令' : '' }}</span>
+      </div>
       <textarea
         ref="inputEl"
         v-model="draft"
         rows="2"
-        placeholder="问问题，或指挥我操作服务器（Enter 发送 / Shift+Enter 换行）"
+        :placeholder="ai.cmdMode ? '如：查看 nginx 最近 100 行错误日志' : '问问题，或指挥我操作服务器（Enter 发送 / Shift+Enter 换行）'"
         @keydown.enter.exact.prevent="send(draft)"
       ></textarea>
       <button v-if="ai.running" class="stop-btn" @click="ai.abort()" title="停止">■ 停止</button>
-      <button v-else class="primary send-btn" :disabled="!draft.trim()" @click="send(draft)">发送</button>
+      <button v-else class="primary send-btn" :disabled="!draft.trim()" @click="send(draft)">{{ ai.cmdMode ? '转命令' : '发送' }}</button>
     </div>
   </div>
 </template>
@@ -103,10 +132,12 @@
 import { ref, reactive, computed, nextTick, watch } from 'vue'
 import { useConfigStore } from '../stores/config'
 import { useAiStore } from '../stores/ai'
+import { useDialogStore } from '../stores/dialog'
 
 const emit = defineEmits(['open-settings', 'open-history'])
 const config = useConfigStore()
 const ai = useAiStore()
+const dialog = useDialogStore()
 
 const draft = ref('')
 const msgsEl = ref(null)
@@ -149,7 +180,46 @@ const TOOL_META = {
   write_local_file: { icon: '✏', label: '写入本机文件' },
   delete_local: { icon: '🗑', label: '删除本机文件' },
   download_server_file: { icon: '⬇', label: '下载服务器文件' },
-  use_skill: { icon: '⚡', label: '加载技能' }
+  use_skill: { icon: '⚡', label: '加载技能' },
+  backup_file: { icon: '⟲', label: '备份文件（安全网）' },
+  restore_file: { icon: '⏪', label: '还原文件' },
+  list_snapshots: { icon: '🗒', label: '查看快照' }
+}
+
+// ---------- 快照 / 流水线入口 ----------
+async function showSnapshots() {
+  if (!ai.snapshots.length) {
+    dialog.showToast('本会话还没有文件快照（AI 修改文件前会自动备份）')
+    return
+  }
+  const choice = await dialog.askChoice({
+    title: '本会话文件快照',
+    message: 'AI 改动前自动备份的原文件，可一键还原。',
+    options: [
+      ...ai.snapshots.map((s, i) => ({
+        value: String(i),
+        label: `[${s.server}] ${s.path}（${new Date(s.time).toLocaleTimeString()} 备份）`
+      })),
+      { value: '__none__', label: '— 关闭，不还原 —' }
+    ]
+  })
+  if (choice == null || choice === '__none__') return
+  await ai.restoreSnapshot(ai.snapshots[Number(choice)])
+}
+async function runPipeline() {
+  const config = useConfigStore()
+  if (!config.pipelines.length) {
+    dialog.showToast('还没有流水线，到 设置→流水线 里把技能串起来')
+    return
+  }
+  const choice = await dialog.askChoice({
+    title: '运行哪条流水线？',
+    message: '按步骤依次执行技能，检查点处会暂停等你确认。',
+    options: config.pipelines.map((p) => ({ value: p.id, label: `${p.name}（${p.steps.length} 步）` }))
+  })
+  if (!choice) return
+  const pl = config.pipelines.find((p) => p.id === choice)
+  if (pl) await ai.runPipeline(pl)
 }
 
 function statusText(st) {
@@ -299,6 +369,36 @@ function mdRender(text) {
   margin-left: 2px;
 }
 @keyframes blink { 50% { opacity: 0; } }
+/* 命令模式消息卡片 */
+.cmd-q { font-size: 11.5px; margin-bottom: 6px; }
+.cmd-out {
+  background: var(--bg0);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--violet);
+  border-radius: 4px;
+  padding: 7px 10px;
+  font-size: 12px;
+  color: var(--green);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.cmd-foot { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+.cmd-foot .primary { font-size: 11.5px; padding: 3px 10px; }
+/* 命令模式开关 */
+.mode-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.mode-pill {
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-faint);
+  border: 1px dashed var(--border-strong);
+}
+.mode-pill.on {
+  color: var(--violet);
+  border: 1px solid rgba(167, 139, 250, 0.5);
+  background: var(--violet-dim);
+}
 /* 思考动画：紧凑单行（三点 + 模型名），不占高度 */
 .thinking {
   display: flex;
