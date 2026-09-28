@@ -221,7 +221,22 @@
               </div>
               <div class="form-row">
                 <label>API Key</label>
-                <input v-model="form.apiKey" type="password" class="mono" placeholder="sk-..." />
+                <input v-model="form.apiKey" type="password" class="mono" placeholder="sk-... 或 tp-..." />
+                <div v-if="keyDecryptFailed" class="key-warn">
+                  ⚠ 已保存的密钥无法解密（加密环境变化所致），请重新粘贴 API Key 并保存
+                </div>
+              </div>
+              <div class="form-row">
+                <label>模型</label>
+                <div style="display:flex; gap:6px">
+                  <input v-model="form.model" class="mono grow" placeholder="deepseek-chat" list="model-suggestions" />
+                  <button @click="fetchModels" :disabled="fetchingModels">{{ fetchingModels ? '获取中...' : '获取列表' }}</button>
+                  <button @click="testConn" :disabled="testingConn">{{ testingConn ? '测试中...' : '测试连接' }}</button>
+                </div>
+                <datalist id="model-suggestions">
+                  <option v-for="m in modelOptions" :key="m" :value="m"></option>
+                </datalist>
+                <div v-if="testResult" :class="testOk ? 'key-ok' : 'key-warn'">{{ testResult }}</div>
               </div>
               <div class="form-row">
                 <label>模型</label>
@@ -256,7 +271,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch } from 'vue'
+import { ref, reactive, watch, computed } from 'vue'
 import { useConfigStore } from '../stores/config'
 import { useDialogStore } from '../stores/dialog'
 import { APPEARANCE_PRESETS } from '../utils/appearance'
@@ -269,6 +284,39 @@ const editingId = ref(null)
 const form = ref(null)
 const fetchingModels = ref(false)
 const modelOptions = ref([])
+const testingConn = ref(false)
+const testResult = ref('')
+const testOk = ref(false)
+const keyDecryptFailed = ref(false)
+
+// 测试连接：拉模型列表验证地址+密钥（不消耗对话 token）
+async function testConn() {
+  const f = form.value
+  if (!f.baseUrl) return alert('请先填写请求地址')
+  testingConn.value = true
+  testResult.value = ''
+  try {
+    const t0 = Date.now()
+    const res = await window.api.aiListModels({
+      protocol: f.protocol === 'anthropic' ? 'anthropic' : 'openai',
+      baseUrl: f.baseUrl.trim(),
+      apiKey: f.apiKey || ''
+    })
+    const ms = Date.now() - t0
+    if (res.ok) {
+      testOk.value = true
+      testResult.value = `✓ 连接成功（${ms}ms），密钥有效，返回 ${res.models.length} 个模型`
+    } else {
+      testOk.value = false
+      testResult.value = '✗ ' + res.error
+    }
+  } catch (e) {
+    testOk.value = false
+    testResult.value = '✗ ' + e.message
+  } finally {
+    testingConn.value = false
+  }
+}
 
 // 外观草稿（即时生效）
 const draftAccent = ref('#3fdc97')
@@ -422,17 +470,26 @@ function removeInstanceCurrent() {
 function newProvider() {
   editingId.value = null
   modelOptions.value = []
+  keyDecryptFailed.value = false
   form.value = { id: null, name: '', protocol: 'openai', baseUrl: '', apiKey: '', model: '' }
 }
 function startEditProvider(p) {
   editingId.value = p.id
   modelOptions.value = p.model ? [p.model] : []
   form.value = { protocol: 'openai', ...p } // 老配置默认 OpenAI 协议
+  // 密钥解密失败：提示重填并清空哨兵值
+  keyDecryptFailed.value = p.apiKey === '\u0000DECRYPT_FAILED'
+  if (keyDecryptFailed.value) form.value.apiKey = ''
+  testResult.value = ''
 }
 async function saveProvider() {
   const f = form.value
   if (!f.name || !f.baseUrl) {
     alert('名称和请求地址不能为空')
+    return
+  }
+  if (keyDecryptFailed.value && !f.apiKey) {
+    alert('原密钥已失效（解密失败），请重新填写 API Key 再保存')
     return
   }
   const data = {
@@ -558,4 +615,19 @@ async function fetchModels() {
 .preset-card:hover { border-color: var(--border-strong); }
 .preset-card.on { border-color: var(--green); color: var(--green); }
 .preset-dot { width: 12px; height: 12px; border-radius: 50%; }
+.key-warn {
+  color: var(--amber);
+  font-size: 12px;
+  background: var(--amber-dim);
+  border: 1px solid rgba(242, 177, 85, 0.35);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}
+.key-ok {
+  color: var(--green);
+  font-size: 12px;
+  background: var(--green-dim);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}
 </style>

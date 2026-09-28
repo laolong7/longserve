@@ -67,7 +67,8 @@ function decryptField(stored) {
   try {
     return safeStorage.decryptString(Buffer.from(stored, 'base64'))
   } catch {
-    return ''
+    // 解密失败返回哨兵值：设置界面据此提示用户重新填写
+    return '\u0000DECRYPT_FAILED'
   }
 }
 
@@ -84,6 +85,11 @@ function load() {
   for (const p of cfg.aiProviders) p.apiKey = decryptField(p.apiKey)
   cache = cfg
   return cfg
+}
+
+// 某字段是否为解密失败哨兵
+function isDecryptFailed(v) {
+  return v === '\u0000DECRYPT_FAILED'
 }
 
 // 保存（深拷贝后加密敏感字段，缓存保持明文）
