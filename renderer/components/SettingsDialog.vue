@@ -203,9 +203,21 @@
                 <input v-model="form.name" placeholder="如：DeepSeek / 中转站A" />
               </div>
               <div class="form-row">
+                <label>接口协议</label>
+                <select v-model="form.protocol">
+                  <option value="openai">OpenAI 兼容（/v1/chat/completions）</option>
+                  <option value="anthropic">Anthropic 原生（/v1/messages）</option>
+                </select>
+                <div class="faint" v-if="form.protocol === 'anthropic'">
+                  Claude 系中转选这个。地址填到端点根（如 https://xx.com/anthropic，末尾不加斜杠），认证用 AUTH_TOKEN。
+                </div>
+                <div class="faint" v-else>
+                  DeepSeek/Kimi/通义/多数中转站选这个。填到域名或 /v1 即可，无需带 /chat/completions。
+                </div>
+              </div>
+              <div class="form-row">
                 <label>请求地址（Base URL）</label>
-                <input v-model="form.baseUrl" class="mono" placeholder="https://api.deepseek.com" />
-                <div class="faint">OpenAI 兼容格式。填到域名或 /v1 即可，无需带 /chat/completions。</div>
+                <input v-model="form.baseUrl" class="mono" :placeholder="form.protocol === 'anthropic' ? 'https://xx.com/anthropic' : 'https://api.deepseek.com'" />
               </div>
               <div class="form-row">
                 <label>API Key</label>
@@ -408,12 +420,12 @@ function removeInstanceCurrent() {
 function newProvider() {
   editingId.value = null
   modelOptions.value = []
-  form.value = { id: null, name: '', baseUrl: '', apiKey: '', model: '' }
+  form.value = { id: null, name: '', protocol: 'openai', baseUrl: '', apiKey: '', model: '' }
 }
 function startEditProvider(p) {
   editingId.value = p.id
   modelOptions.value = p.model ? [p.model] : []
-  form.value = { ...p }
+  form.value = { protocol: 'openai', ...p } // 老配置默认 OpenAI 协议
 }
 async function saveProvider() {
   const f = form.value
@@ -424,6 +436,7 @@ async function saveProvider() {
   const data = {
     id: f.id || config.newProviderId(),
     name: f.name.trim(),
+    protocol: f.protocol === 'anthropic' ? 'anthropic' : 'openai',
     baseUrl: f.baseUrl.trim(),
     apiKey: f.apiKey || '',
     model: (f.model || '').trim()
