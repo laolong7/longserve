@@ -49,7 +49,11 @@
 </template>
 
 <script setup>
-// 数据源：systemctl list-units --all（运行态）+ list-unit-files（开机自启态），
+// 数据源三路合并：
+//   ① systemctl list-units --all（已加载的运行态）
+//   ② systemctl list-unit-files（装了但从未启动的服务）
+//   ③ 常见服务名单逐个 is-active/is-enabled 兜底探测（nginx/gunicorn/mysql…，
+//      覆盖 unit 文件在非标准位置的极简系统）
 // 操作直接 systemctl start/stop/restart/enable/disable，操作后刷新。
 // 关键服务（sshd/network 等）操作前会追加"可能断开连接"的强确认。
 import { ref, computed, watch } from 'vue'
@@ -70,6 +74,14 @@ const tab = computed(() => store.activeTab)
 // 这些服务停掉可能直接断掉自己的 SSH 会话，务必二次敲响警钟
 const CRITICAL = /^(sshd|ssh|network|networking|systemd-networkd|systemd-logind)\b/
 
+// 常见服务兜底探测名单（按需可继续加）
+const COMMON_SERVICES = [
+  'nginx', 'apache2', 'httpd', 'caddy',
+  'mysql', 'mysqld', 'mariadb', 'postgresql', 'redis', 'redis-server', 'mongod',
+  'docker', 'containerd', 'php-fpm', 'php8.1-fpm', 'php8.2-fpm',
+  'gunicorn', 'uwsgi', 'pm2', 'node', 'frps', 'frpc', 'xray', 'v2ray', 'fail2ban', 'ufw'
+]
+
 const shown = computed(() => {
   const kw = filter.value.trim().toLowerCase()
   return units.value.filter((u) => {
@@ -87,30 +99,66 @@ async function refresh() {
   if (!t || t.status !== 'connected') { units.value = []; return }
   loading.value = true
   err.value = ''
+  const candidates = COMMON_SERVICES.join(' ')
   const cmd =
     'systemctl list-units --type=service --all --no-legend --no-pager 2>/dev/null; ' +
-    'echo "|SEP|"; systemctl list-unit-files --type=service --no-legend --no-pager 2>/dev/null'
-  const res = await window.api.sshExec(t.id, cmd, 15000)
+    'echo "|SEP|"; systemctl list-unit-files --type=service --no-legend --no-pager 2>/dev/null; ' +
+    'echo "|SEP|"; for s in ' + candidates + '; do a=$(systemctl is-active $s 2>/dev/null); e=$(systemctl is-enabled $s 2>/dev/null); echo "$s $a $e"; done'
+  const res = await window.api.sshExec(t.id, cmd, 20000)
   loading.value = false
   if (!res.ok) { err.value = res.error; return }
-  const [runPart, filePart] = (res.stdout || '').split('|SEP|')
+  const seg = (res.stdout || '').split('|SEP|')
   const enabledMap = {}
-  for (const l of (filePart || '').split('\n')) {
+  for (const l of (seg[1] || '').split('\n')) {
     const parts = l.trim().split(/\s+/)
     if (parts.length >= 2) enabledMap[parts[0]] = parts[1]
   }
-  units.value = (runPart || '')
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .map((l) => {
-      // UNIT LOAD ACTIVE SUB DESCRIPTION
-      const parts = l.split(/\s+/)
-      const unit = parts[0]
-      const active = parts[3] || 'unknown'
-      const desc = parts.slice(4).join(' ')
-      return { unit, active, desc, enabled: enabledMap[unit] || '?', __open: false }
+  const byName = new Map() // 去掉 .service 的短名 -> 条目
+  // ① 已加载 units：格式 UNIT LOAD ACTIVE SUB DESCRIPTION（ACTIVE 是第 3 列，SUB 第 4 列）
+  for (const l of (seg[0] || '').split('\n')) {
+    const line = l.trim()
+    if (!line) continue
+    const parts = line.split(/\s+/)
+    if (parts.length < 4) continue
+    const unit = parts[0]
+    const active = parts[2] || 'unknown'
+    const sub = parts[3] || ''
+    const desc = parts.slice(4).join(' ')
+    byName.set(unit.replace(/\.service$/, ''), {
+      unit, active, sub, desc,
+      enabled: enabledMap[unit] || '?', __open: false
     })
+  }
+  // ② unit-files 里存在但没被 list-units 加载的服务（装了没启动过）
+  for (const l of (seg[1] || '').split('\n')) {
+    const parts = l.trim().split(/\s+/)
+    if (parts.length < 2) continue
+    const unit = parts[0]
+    const short = unit.replace(/\.service$/, '')
+    if (!byName.has(short)) {
+      byName.set(short, { unit, active: 'inactive', sub: '', desc: '（已安装，未运行）', enabled: parts[1] || '?', __open: false })
+    }
+  }
+  // ③ 常见服务兜底探测（is-active 输出 active/inactive/failed/unknown）
+  for (const l of (seg[2] || '').split('\n')) {
+    const parts = l.trim().split(/\s+/)
+    if (parts.length < 2) continue
+    const [name, active, enabled] = parts
+    if (active === 'active' || active === 'failed') {
+      if (!byName.has(name)) {
+        byName.set(name, { unit: name + '.service', active, sub: '', desc: '（常见服务探测）', enabled: enabled || '?', __open: false })
+      } else if (byName.get(name).active === 'inactive') {
+        // 探测到 active 但 list-units 没给：以探测为准
+        const u = byName.get(name)
+        u.active = active
+        if (enabled && enabled !== 'unknown') u.enabled = enabled
+      }
+    }
+  }
+  // 运行中的排前，其余按名称
+  units.value = [...byName.values()].sort((a, b) =>
+    (b.active === 'active') - (a.active === 'active') || a.unit.localeCompare(b.unit)
+  )
 }
 
 async function act(u, op) {

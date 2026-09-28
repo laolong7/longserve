@@ -26,52 +26,54 @@
     <div class="actions">
       <button
         v-if="store.activeTab && store.activeTab.status === 'connected'"
-        class="ghost"
-        title="查看服务器日志（实时跟随）"
+        class="ghost tb-ico"
+        title="服务器日志（实时跟随）"
         @click="emit('open-logs')"
-      >▤ 日志</button>
+      >▤</button>
       <button
         v-if="store.activeTab && store.activeTab.status === 'connected'"
-        class="ghost"
-        title="SSH 端口转发（本地 / 远程）"
+        class="ghost tb-ico"
+        title="端口转发（本地 / 远程隧道）"
         @click="emit('open-tunnels')"
-      >⇄ 隧道</button>
+      >⇄</button>
       <button
         v-if="store.activeTab"
-        class="ghost"
+        class="ghost tb-ico"
         title="对当前服务器再开一个并行连接"
         @click="duplicate"
-      >⧉ 多开</button>
+      >⧉</button>
       <button
         v-if="store.activeTab"
-        class="ghost"
+        class="ghost tb-ico"
         :class="{ on: store.split }"
-        title="与当前终端上下并列一条新连接（最多两个）"
+        title="并列：选一台服务器与当前终端上下各占一半（最多两个）"
         @click="splitView"
-      >◫ 并列</button>
+      >◫</button>
       <button
         v-if="store.activeTab && store.activeTab.status === 'connected'"
-        class="ghost rec"
+        class="ghost tb-ico rec"
         :class="{ recording: !!store.recording }"
         :title="store.recording ? `停止录制并保存（正在录制 ${store.recording.tabName}）` : '录制当前终端会话（asciinema 格式）'"
         @click="toggleRecord"
-      >{{ store.recording ? '⏺ 录制中' : '⏺ 录制' }}</button>
+      >⏺</button>
       <button
         v-if="store.activeTab && store.activeTab.status === 'connected'"
-        class="ghost"
+        class="ghost tb-ico"
         title="文件传输（SFTP）"
         @click="emit('open-files')"
-      >⇅ 文件</button>
+      >⇅</button>
     </div>
   </div>
 </template>
 
 <script setup>
 import { useTerminalStore } from '../stores/terminals'
+import { useConfigStore } from '../stores/config'
 import { useDialogStore } from '../stores/dialog'
 
 const emit = defineEmits(['open-files', 'open-logs', 'open-tunnels'])
 const store = useTerminalStore()
+const config = useConfigStore()
 const dialog = useDialogStore()
 
 const qualityOf = store.qualityOf
@@ -79,8 +81,25 @@ const qualityOf = store.qualityOf
 function duplicate() {
   if (store.activeTab) store.openTab(store.activeTab.instance)
 }
+// 并列：先选要与当前终端并列的服务器（可以是当前这台，也可以是别的）
 async function splitView() {
-  const r = await store.openSplit()
+  if (!config.instances.length) {
+    dialog.showToast('还没有添加服务器')
+    return
+  }
+  const cur = store.activeTab
+  const choice = await dialog.askChoice({
+    title: '哪个服务器与当前终端并列？',
+    message: `将与「${cur.name}」上下各占一半（选当前服务器则新开一条连接）。`,
+    options: config.instances.map((i) => ({
+      value: i.id,
+      label: `${i.name}（${i.host}:${i.port}）${i.id === cur.instanceId ? ' ← 当前' : ''}`
+    }))
+  })
+  if (!choice) return
+  const inst = config.instances.find((i) => i.id === choice)
+  if (!inst) return
+  const r = await store.openSplit(inst)
   if (r === 'max') dialog.showToast('最多只能并列两个终端')
   else if (r === 'none') dialog.showToast('当前没有终端连接')
 }
@@ -154,11 +173,20 @@ function close(tab) {
 .actions {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 0 8px;
+  gap: 1px;
+  padding: 0 6px;
   border-left: 1px solid var(--border);
+  flex-shrink: 0;
 }
-.actions .ghost { font-size: 12px; padding: 4px 9px; white-space: nowrap; }
+/* 图标化按钮：只留符号留 title，避免挤占标签栏把终端标签的关闭叉顶没 */
+.actions .ghost.tb-ico {
+  width: 30px;
+  min-width: 30px;
+  padding: 4px 0;
+  font-size: 14px;
+  text-align: center;
+  white-space: nowrap;
+}
 .actions .ghost.on { color: var(--green); }
 .actions .ghost.rec.recording { color: var(--red); animation: rec-blink 1.4s ease-in-out infinite; }
 @keyframes rec-blink { 50% { opacity: 0.5; } }

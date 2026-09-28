@@ -36,6 +36,8 @@ contextBridge.exposeInMainWorld('api', {
   tunnelStop: (tunnelId) => ipcRenderer.send('tunnel:stop', tunnelId),
   tunnelList: (connId) => ipcRenderer.invoke('tunnel:list', connId),
   recordingsDefaultDir: () => ipcRenderer.invoke('recordings:default-dir'),
+  recordingsRead: (filePath) => ipcRenderer.invoke('recordings:read', filePath),
+  recordingsWriteBinary: (filePath, base64) => ipcRenderer.invoke('recordings:write-binary', filePath, base64),
 
   // ---------- SFTP ----------
   sftpHome: (connId) => ipcRenderer.invoke('sftp:home', connId),

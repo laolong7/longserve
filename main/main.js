@@ -33,12 +33,12 @@ app.on('second-instance', () => {
 
 const wins = new Set() // 多窗口：每个 BrowserWindow 都能各自开终端
 
-// 窗口效果：none=不透明 / acrylic=Win11 磨砂 / transparent=真透明（看到桌面）
+// 窗口效果：transparent=真透明（默认，看到桌面）/ acrylic=Win11 磨砂 / none=不透明
 function currentEffect() {
   try {
     const a = store.load().appearance
-    return (a && a.windowEffect) || 'none'
-  } catch { return 'none' }
+    return (a && a.windowEffect) || 'transparent'
+  } catch { return 'transparent' }
 }
 
 function createWindow(opts = {}) {
@@ -170,6 +170,23 @@ function registerIpc() {
     const dir = path.join(app.getPath('userData'), 'recordings')
     try { fs.mkdirSync(dir, { recursive: true }) } catch { /* 目录建不上则首次保存时报错 */ }
     return dir
+  })
+  // 读取 .cast（录制可能数 MB，local:read 的 200KB 限制不适用；20MB 硬上限防滥用）
+  ipcMain.handle('recordings:read', async (_e, filePath) => {
+    try {
+      const st = fs.statSync(filePath)
+      if (st.size > 20 * 1024 * 1024) return { ok: false, error: `文件过大（${Math.round(st.size / 1048576)}MB），仅支持 20MB 内的录制` }
+      return { ok: true, content: fs.readFileSync(filePath, 'utf8') }
+    } catch (err) { return { ok: false, error: err.message } }
+  })
+  // 回放导出的视频（base64 → 二进制落盘）
+  ipcMain.handle('recordings:write-binary', (_e, filePath, base64) => {
+    try {
+      const buf = Buffer.from(String(base64).split(',').pop(), 'base64')
+      fs.mkdirSync(path.dirname(filePath), { recursive: true })
+      fs.writeFileSync(filePath, buf)
+      return { ok: true, size: buf.length }
+    } catch (err) { return { ok: false, error: err.message } }
   })
 
   // ---------- SFTP ----------

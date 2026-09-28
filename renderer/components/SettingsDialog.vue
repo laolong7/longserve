@@ -288,6 +288,7 @@
               <label>会话录制保存位置（asciinema .cast 格式，可在终端标签栏点「⏺ 录制」启停）</label>
               <div class="mono" style="word-break:break-all; background:var(--bg2); padding:8px 10px; border-radius:6px; font-size:12px">{{ recordDirShown }}</div>
               <div style="display:flex; gap:8px">
+                <button class="primary" @click="openCast">▶ 预览 / 回放录制…</button>
                 <button @click="changeRecordDir">更改位置…</button>
                 <button class="ghost" @click="resetRecordDir">恢复默认</button>
               </div>
@@ -387,13 +388,14 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch, computed } from 'vue'
+import { ref, reactive, watch, computed, inject } from 'vue'
 import { useConfigStore } from '../stores/config'
 import { useDialogStore } from '../stores/dialog'
 import { APPEARANCE_PRESETS } from '../utils/appearance'
 
 const config = useConfigStore()
 const dialog = useDialogStore()
+const openCast = inject('openCast', () => {})
 const visible = ref(false)
 const tab = ref('instances')
 const editingId = ref(null)
@@ -434,15 +436,15 @@ async function testConn() {
   }
 }
 
-// 外观草稿（即时生效）
-const draftAccent = ref('#3fdc97')
-const draftText = ref('#d8dce4')
-const draftHue = ref(222)
-const draftAlpha = ref(100)
-const draftFs = ref(14)
-const draftTermBg = ref('')
+// 外观草稿（即时生效；兜底值=默认深海蓝主题）
+const draftAccent = ref('#5ccfe6')
+const draftText = ref('#cfe3ef')
+const draftHue = ref(210)
+const draftAlpha = ref(59)
+const draftFs = ref(11)
+const draftTermBg = ref('#1d2530')
 const draftTermFg = ref('')
-const draftEffect = ref('none')
+const draftEffect = ref('transparent')
 
 const EFFECTS = [
   { value: 'none', label: '不透明' },
@@ -452,14 +454,14 @@ const EFFECTS = [
 
 function syncDrafts() {
   const a = config.appearance
-  draftAccent.value = a?.accent || '#3fdc97'
-  draftText.value = a?.text || '#d8dce4'
-  draftHue.value = a?.bgHue ?? 222
-  draftAlpha.value = a?.bgAlpha ?? 100
-  draftFs.value = a?.termFontSize ?? 14
-  draftTermBg.value = a?.termBg || ''
+  draftAccent.value = a?.accent || '#5ccfe6'
+  draftText.value = a?.text || '#cfe3ef'
+  draftHue.value = a?.bgHue ?? 210
+  draftAlpha.value = a?.bgAlpha ?? 59
+  draftFs.value = a?.termFontSize ?? 11
+  draftTermBg.value = a?.termBg ?? '#1d2530' // 默认深海蓝终端底；显式''=跟随全局
   draftTermFg.value = a?.termFg || ''
-  draftEffect.value = a?.windowEffect || 'none'
+  draftEffect.value = a?.windowEffect || 'transparent'
 }
 watch(tab, (t) => { if (t === 'appearance') syncDrafts() })
 

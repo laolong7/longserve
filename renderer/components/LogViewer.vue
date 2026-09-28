@@ -18,6 +18,8 @@
         <div v-if="truncated" class="log-trunc">（显示区已达上限，仅展示最近 {{ MAX_LINES }} 行，输入关键字过滤）</div>
         <div v-for="(l, i) in shown" :key="i" class="log-line mono" v-html="hl(l)"></div>
       </div>
+      <!-- 右下角拖拽调宽高 -->
+      <div class="log-resize" @mousedown.prevent="startResize"></div>
     </div>
   </Teleport>
 </template>
@@ -165,6 +167,24 @@ function startDrag(e) {
   document.addEventListener('mouseup', up)
 }
 
+// 右下角拖拽调整宽高
+function startResize(e) {
+  const ax = e.clientX
+  const ay = e.clientY
+  const w0 = pos.w
+  const h0 = pos.h
+  const move = (ev) => {
+    pos.w = Math.max(320, Math.min(window.innerWidth - pos.x - 8, w0 + ev.clientX - ax))
+    pos.h = Math.max(120, Math.min(window.innerHeight - pos.y - 8, h0 + ev.clientY - ay))
+  }
+  const up = () => {
+    document.removeEventListener('mousemove', move)
+    document.removeEventListener('mouseup', up)
+  }
+  document.addEventListener('mousemove', move)
+  document.addEventListener('mouseup', up)
+}
+
 defineExpose({ open })
 </script>
 
@@ -223,4 +243,16 @@ defineExpose({ open })
   padding: 0 1px;
 }
 .log-trunc { font-size: 11px; color: var(--amber); padding-bottom: 6px; }
+/* 右下角 resize handle：三条斜线的经典手柄 */
+.log-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  background:
+    linear-gradient(135deg, transparent 0 50%, var(--border-strong) 50% 55%, transparent 55% 65%, var(--border-strong) 65% 70%, transparent 70% 80%, var(--border-strong) 80% 85%, transparent 85%);
+  border-radius: 0 0 var(--radius) 0;
+}
 </style>

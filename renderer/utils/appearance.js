@@ -2,35 +2,33 @@
 // 外观系统：由 appearance 配置动态生成全部 CSS 变量
 // a: { accent, text, bgHue, bgAlpha, termFontSize } 或 null（默认）
 // 设计要点：
-//   - 背景色相饱和度 26~34%，保证色相滑块肉眼可见（16% 太灰等于没反应）
+//   - 默认主题为「深海蓝 + 真透明」（牢笼 2026-09-28 定）：
+//     accent #5ccfe6 / 文字 #cfe3ef / 色相 210° / 透明度 59% / 终端字号 11px
+//     终端背景 #1d2530（RGB 29 37 48），窗口效果真透明
 //   - bgHue 允许 0（Number(x)||222 会把 0 当假值，属历史 bug）
-//   - 透明度要有参照物才看得见：html 底改为随色相的辉光渐变，
+//   - 透明度要有参照物才看得见：html 底为随色相的辉光渐变，
 //     面板/终端半透明后透出光晕，低透明度才有"通透"感
 //   - 终端背景/前景/光标/选区跟随同一套外观（工作页面最大面积）
 // ============================================================
 
-// style.css 里的默认值（恢复默认时用）
-const DEFAULTS = [
-  ['--backdrop', '#0e1013'],
-  ['--bg0', '#14161b'],
-  ['--bg1', '#191c22'],
-  ['--bg2', '#20242c'],
-  ['--bg3', '#282d37'],
-  ['--border', '#2c313c'],
-  ['--border-strong', '#3a404d'],
-  ['--text', '#d8dce4'],
-  ['--text-dim', '#8a92a2'],
-  ['--text-faint', '#5c6474'],
-  ['--green', '#3fdc97'],
-  ['--green-dim', 'rgba(63, 220, 151, 0.14)']
-]
+// 默认外观（新装无配置时生效；"恢复默认"也回到这里）
+export const DEFAULT_APPEARANCE = {
+  accent: '#5ccfe6',
+  text: '#cfe3ef',
+  bgHue: 210,
+  bgAlpha: 59,
+  termFontSize: 11,
+  termBg: '#1d2530', // RGB 29 37 48
+  termFg: '',
+  windowEffect: 'transparent'
+}
 
 // 终端基础主题（one-dark 风格；ANSI 内容色保留各自色相，保证红=错绿=对）
 const TERM_BASE = {
-  background: '#14161b',
-  foreground: '#d8dce4',
-  cursor: '#3fdc97',
-  cursorAccent: '#14161b',
+  background: '#1d2530',
+  foreground: '#cfe3ef',
+  cursor: '#5ccfe6',
+  cursorAccent: '#1d2530',
   selectionBackground: 'rgba(110, 168, 254, 0.30)',
   black: '#282c34',
   red: '#e06c75',
@@ -51,8 +49,8 @@ const TERM_BASE = {
 }
 
 export const APPEARANCE_PRESETS = [
-  { name: '磷光绿（默认）', accent: '#3fdc97', text: '#d8dce4', bgHue: 222 },
-  { name: '深海蓝', accent: '#5ccfe6', text: '#cfe3ef', bgHue: 210 },
+  { name: '深海蓝（默认）', accent: '#5ccfe6', text: '#cfe3ef', bgHue: 210 },
+  { name: '磷光绿', accent: '#3fdc97', text: '#d8dce4', bgHue: 222 },
   { name: '暖橙', accent: '#f2a15a', text: '#ecdfd2', bgHue: 20 },
   { name: '紫夜', accent: '#a78bfa', text: '#ddd6f3', bgHue: 265 },
   { name: '灰岩', accent: '#9db2c7', text: '#d5dae0', bgHue: 215 }
@@ -67,10 +65,18 @@ function hexToRgba(hex, alpha) {
 
 // 解析外观项；hue 用 Number.isFinite 判定，0° 是合法值
 function parseAppearance(a) {
-  const { accent = '#3fdc97', text = '#d8dce4', bgHue = 222, bgAlpha = 100, termBg, termFg, windowEffect = 'none' } = a
+  const {
+    accent = DEFAULT_APPEARANCE.accent,
+    text = DEFAULT_APPEARANCE.text,
+    bgHue = DEFAULT_APPEARANCE.bgHue,
+    bgAlpha = DEFAULT_APPEARANCE.bgAlpha,
+    termBg = DEFAULT_APPEARANCE.termBg,
+    termFg = DEFAULT_APPEARANCE.termFg,
+    windowEffect = DEFAULT_APPEARANCE.windowEffect
+  } = a || {}
   const alpha = Math.min(100, Math.max(30, Number(bgAlpha) || 100)) / 100
-  const h = Number.isFinite(Number(bgHue)) ? Number(bgHue) : 222
-  return { accent, text, h, alpha, termBg: termBg || '', termFg: termFg || '', windowEffect }
+  const h = Number.isFinite(Number(bgHue)) ? Number(bgHue) : DEFAULT_APPEARANCE.bgHue
+  return { accent, text, h, alpha, termBg, termFg, windowEffect }
 }
 
 // 应用到 CSS 变量
@@ -78,12 +84,9 @@ function parseAppearance(a) {
 // 用户选"下次打开时应用"时配置已保存新值，但渲染继续按旧效果，避免视觉错乱）
 export function applyAppearance(a, effectOverride) {
   const root = document.documentElement
-  if (!a) {
-    for (const [k, v] of DEFAULTS) root.style.setProperty(k, v)
-    return
-  }
-  const { accent, text, h, alpha } = parseAppearance(a)
-  const windowEffect = effectOverride || parseAppearance(a).windowEffect
+  const cfg = parseAppearance(a) // null/缺省字段都落到默认深海蓝
+  const { accent, text, h, alpha } = cfg
+  const windowEffect = effectOverride || cfg.windowEffect
 
   // html 底：
   //   none       = 随色相辉光渐变（不透明窗口）
@@ -116,11 +119,10 @@ export function applyAppearance(a, effectOverride) {
   root.style.setProperty('--text-faint', hexToRgba(text, 0.4))
 }
 
-// 终端主题片段（xterm 用）：null=默认。
-// 背景/前景优先用独立的 termBg/termFg（外观设置可单独调），
-// 留空则跟随全局 —— 用面板同款亮度（11%，即 --bg1），和旁边系统 UI 融为一体而不是一块纯黑
+// 终端主题片段（xterm 用）。
+// 背景/前景优先用独立的 termBg/termFg（外观设置可单独调），留空则跟随全局
+// —— 跟随全局用面板同款亮度（11%，即 --bg1），和旁边系统 UI 融为一体而不是一块纯黑
 export function getTermTheme(a) {
-  if (!a) return { ...TERM_BASE }
   const { accent, text, h, alpha, termBg, termFg } = parseAppearance(a)
   return {
     ...TERM_BASE,

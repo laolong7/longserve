@@ -47,6 +47,7 @@
     <AboutDialog ref="aboutRef" />
     <TunnelDialog ref="tunnelsRef" />
     <LogViewer ref="logsRef" />
+    <CastPlayerDialog ref="castRef" />
   </div>
 </template>
 
@@ -66,6 +67,7 @@ import HistoryDialog from './components/HistoryDialog.vue'
 import AboutDialog from './components/AboutDialog.vue'
 import TunnelDialog from './components/TunnelDialog.vue'
 import LogViewer from './components/LogViewer.vue'
+import CastPlayerDialog from './components/CastPlayerDialog.vue'
 import { useConfigStore } from './stores/config'
 import { useTerminalStore } from './stores/terminals'
 import { applyAppearance } from './utils/appearance'
@@ -79,6 +81,7 @@ const historyRef = ref(null)
 const aboutRef = ref(null)
 const tunnelsRef = ref(null)
 const logsRef = ref(null)
+const castRef = ref(null)
 // action: { type:'new-instance' } | { type:'edit-instance', id } | undefined
 const openSettings = (tabName, action) => settingsRef.value?.open(tabName, action)
 const openFiles = () => filesRef.value?.open()
@@ -86,8 +89,10 @@ const openHistory = () => historyRef.value?.open()
 const openAbout = () => aboutRef.value?.open()
 const openTunnels = () => tunnelsRef.value?.open(store.activeTab)
 const openLogs = () => logsRef.value?.open()
+const openCast = () => castRef.value?.open()
 provide('openSettings', openSettings)
 provide('openAbout', openAbout)
+provide('openCast', openCast)
 
 onMounted(async () => {
   await config.init()

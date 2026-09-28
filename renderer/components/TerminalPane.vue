@@ -8,6 +8,15 @@
   >
     <div ref="hostEl" class="term-host"></div>
 
+    <!-- 并列模式：本格独立关闭（不用去挤被遮住的标签栏） -->
+    <button
+      v-if="inSplitPane"
+      class="pane-close"
+      title="关闭这个并列终端"
+      @mousedown.stop
+      @click="store.closeSplitPane(props.tab)"
+    >✕</button>
+
     <!-- Ctrl+F 搜索条 -->
     <div v-if="searchOpen" class="search-bar" @mousedown.stop>
       <input
@@ -36,8 +45,10 @@
     <div v-if="tab.status !== 'connected'" class="pane-overlay">
       <template v-if="tab.status === 'connecting'">
         <div class="conn-anim">
-          <div class="conn-ring"></div>
-          <div class="conn-ring delay"></div>
+          <div class="conn-ring r1"></div>
+          <div class="conn-ring r2"></div>
+          <div class="conn-ring r3"></div>
+          <div class="conn-core"></div>
         </div>
         <div class="conn-title">正在连接 {{ tab.instance.host }}:{{ tab.instance.port }}</div>
         <!-- 真实连接阶段日志（来自 ssh2 事件流） -->
@@ -327,6 +338,11 @@ const isActive = computed(() => store.activeTabId === props.tab.id)
 watch(isActive, (a) => {
   if (a && props.visible) nextTick(() => term && term.focus())
 })
+// 本格是否处于上下并列中（显示独立关闭叉）
+const inSplitPane = computed(() => {
+  const s = store.split
+  return !!s && (props.tab === s.top || props.tab === s.bottom)
+})
 watch(
   () => props.tab.status,
   (st) => {
@@ -412,7 +428,9 @@ const tab = computed(() => props.tab)
 .pane-wrap {
   position: relative;
   height: 100%;
-  background: var(--bg0);
+  /* 不画底：xterm 主题背景本身就是半透明的（跟随全局/自定义都带 alpha），
+     这里再垫一层 --bg0 会多叠一层导致终端比面板明显发黑，直接透出统一底色 */
+  background: transparent;
 }
 .term-host { height: 100%; padding: 4px 6px 2px; }
 /* Ctrl+F 搜索条：右上角浮层 */
@@ -463,6 +481,28 @@ const tab = computed(() => props.tab)
 .du-text { font-size: 11.5px; color: var(--green); margin-bottom: 5px; word-break: break-all; }
 .du-bar { height: 5px; background: var(--bg0); border-radius: 3px; overflow: hidden; }
 .du-bar-in { height: 100%; background: var(--green); transition: width 0.2s; }
+/* 并列格独立关闭叉 */
+.pane-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  line-height: 20px;
+  text-align: center;
+  padding: 0;
+  font-size: 12px;
+  color: var(--text-faint);
+  background: rgba(20, 22, 27, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  z-index: 20;
+}
+.pane-close:hover {
+  color: #fff;
+  background: var(--red);
+  border-color: var(--red);
+}
 .pane-overlay {
   position: absolute;
   inset: 0;
@@ -477,25 +517,47 @@ const tab = computed(() => props.tab)
 }
 .overlay-title { color: var(--red); font-size: 15px; margin-bottom: 2px; }
 
-/* 连接动画：双环呼吸旋转 */
+/* 连接动画：三环相位差旋转 + 辉光 + 中心脉冲光核 */
 .conn-anim {
   position: relative;
-  width: 44px;
-  height: 44px;
+  width: 52px;
+  height: 52px;
 }
 .conn-ring {
   position: absolute;
-  inset: 0;
   border-radius: 50%;
   border: 2px solid transparent;
-  border-top-color: var(--green);
-  animation: conn-spin 1s linear infinite;
 }
-.conn-ring.delay {
-  inset: 8px;
+.conn-ring.r1 {
+  inset: 0;
+  border-top-color: var(--green);
+  border-right-color: rgba(92, 207, 230, 0.25);
+  filter: drop-shadow(0 0 4px rgba(92, 207, 230, 0.45));
+  animation: conn-spin 1.1s linear infinite;
+}
+.conn-ring.r2 {
+  inset: 7px;
   border-top-color: var(--blue);
-  animation-duration: 1.5s;
-  animation-direction: reverse;
+  border-left-color: rgba(110, 168, 254, 0.22);
+  filter: drop-shadow(0 0 3px rgba(110, 168, 254, 0.4));
+  animation: conn-spin 1.6s linear infinite reverse;
+}
+.conn-ring.r3 {
+  inset: 14px;
+  border-top-color: var(--amber);
+  filter: drop-shadow(0 0 3px rgba(242, 177, 85, 0.4));
+  animation: conn-spin 0.8s linear infinite;
+}
+.conn-core {
+  position: absolute;
+  inset: 21px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: conn-core 1.2s ease-in-out infinite;
+}
+@keyframes conn-core {
+  0%, 100% { transform: scale(0.55); opacity: 0.55; }
+  50% { transform: scale(1); opacity: 1; }
 }
 @keyframes conn-spin { to { transform: rotate(360deg); } }
 .conn-title { color: var(--text); font-size: 14px; }

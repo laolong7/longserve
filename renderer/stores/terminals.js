@@ -24,11 +24,15 @@ export const useTerminalStore = defineStore('terminals', {
       return state.activeTab ? state.paneRefs.get(state.activeTab) : null
     },
     // 并列模式下面板可见性判断（App.vue 用）
+    // 并列关系一旦建立就保留：切到第三个 tab 时临时全屏显示它，
+    // 点回并列成员自动恢复上下并列（不再像旧版一样切走就拆散）
     isPaneVisible(state) {
-      return (tab) =>
-        state.split
-          ? tab === state.split.top || tab === state.split.bottom
-          : tab.id === state.activeTabId
+      return (tab) => {
+        if (!state.split) return tab.id === state.activeTabId
+        const inSplit = tab === state.split.top || tab === state.split.bottom
+        const activeInSplit = state.activeTabId === state.split.top.id || state.activeTabId === state.split.bottom.id
+        return activeInSplit ? inSplit : tab.id === state.activeTabId
+      }
     },
     qualityOf(state) {
       return (connId) => state.quality.get(connId) || null
@@ -51,14 +55,15 @@ export const useTerminalStore = defineStore('terminals', {
       await this.establish(tempId)
     },
 
-    // 并列：对当前实例开一条新连接，与当前终端上下各占 1/2 高度
+    // 并列：把指定服务器的连接与当前终端上下各占 1/2 高度
+    // instance 由"并列"按钮的选择器传入（可以是当前服务器也可以是别的服务器）
     // 返回 'ok' | 'max'（已并列两个） | 'none'（无当前连接）
-    async openSplit() {
+    async openSplit(instance) {
       if (this.split) return 'max'
       const cur = this.activeTab
-      if (!cur) return 'none'
+      if (!cur || !instance) return 'none'
       const count = this.tabs.length
-      await this.openTab(cur.instance)
+      await this.openTab(instance)
       const newTab = this.tabs.length > count ? this.tabs[this.tabs.length - 1] : null
       if (!newTab) return 'error'
       this.split = { top: cur, bottom: newTab }
@@ -124,12 +129,17 @@ export const useTerminalStore = defineStore('terminals', {
     },
 
     setActive(tabId) {
-      // 并列模式下切到第三个 tab：退出并列，正常全屏显示它
-      if (this.split) {
-        const t = this.tabs.find((x) => x.id === tabId)
-        if (t && t !== this.split.top && t !== this.split.bottom) this.split = null
-      }
+      // 并列关系不因切换标签而销毁：切到第三个 tab 全屏显示，切回并列成员自动恢复
       this.activeTabId = tabId
+    },
+
+    // 并列格独立关闭（pane 右上角红叉）：关掉谁就退出并列，另一格恢复全屏
+    async closeSplitPane(tab) {
+      if (!this.split) return
+      const other = tab === this.split.top ? this.split.bottom : this.split.top
+      this.split = null
+      await this.closeTab(tab.id)
+      if (other && this.tabs.includes(other)) this.activeTabId = other.id
     },
 
     async closeTab(tabId) {

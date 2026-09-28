@@ -58,7 +58,10 @@
         <!-- AI 消息 -->
         <div v-else class="msg assistant">
           <div class="assistant-tag" :title="m.model || 'AI'">{{ m.model || 'AI' }}</div>
-          <div class="bubble ai-bubble selectable">
+          <div
+            class="bubble ai-bubble selectable"
+            :class="{ loading: m.status === 'streaming' && !m.content && !m.reasoning && !m.toolCalls.length }"
+          >
             <!-- 思考过程：流式展开，完成后默认收起，可点开回看 -->
             <div v-if="m.reasoning" class="reas" :class="{ open: reasOpen(m) }">
               <div class="reas-head" @click="toggleReas(m)">
@@ -92,10 +95,13 @@
               </div>
             </div>
 
-            <!-- 等待首字：紧凑单行指示（模型名可见） -->
+            <!-- 等待首字：光带贯穿整个气泡高度巡回 + 模型名 -->
             <div v-if="m.status === 'streaming' && !m.content && !m.reasoning && !m.toolCalls.length" class="thinking">
-              <span class="th-dot"></span><span class="th-dot"></span><span class="th-dot"></span>
-              <span class="th-text">{{ m.model || 'AI' }} 思考中…</span>
+              <div class="th-sweep"></div>
+              <div class="th-caption">
+                <span class="th-dot"></span><span class="th-dot"></span><span class="th-dot"></span>
+                <span class="th-text">{{ m.model || 'AI' }} 思考中…</span>
+              </div>
             </div>
           </div>
         </div>
@@ -399,13 +405,50 @@ function mdRender(text) {
   border: 1px solid rgba(167, 139, 250, 0.5);
   background: var(--violet-dim);
 }
-/* 思考动画：紧凑单行（三点 + 模型名），不占高度 */
+/* 思考动画：光带贯穿整个气泡高度上下巡回（新颖+明显+简洁） */
+.ai-bubble.loading {
+  position: relative;
+  min-height: 76px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+}
 .thinking {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+}
+.th-sweep {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -60%;
+  height: 60%;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(167, 139, 250, 0.10) 30%,
+    rgba(167, 139, 250, 0.26) 50%,
+    rgba(167, 139, 250, 0.10) 70%,
+    transparent 100%
+  );
+  animation: th-sweep 1.5s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+@keyframes th-sweep {
+  0% { top: -60%; }
+  100% { top: 100%; }
+}
+.th-caption {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
-  margin-top: 2px;
-  min-height: 18px;
+  padding-left: 4px;
 }
 .th-dot {
   width: 5px;

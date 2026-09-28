@@ -70,10 +70,43 @@ const server = new ssh2.Server(
           })
         })
         session.on('sftp', (acceptSftp) => handleSftp(acceptSftp))
+        // exec 通道：ssh-manager.exec / 质量采样 / systemd 查询走这里
+        session.on('exec', (acceptExec, _rejectExec, info) => {
+          const ch = acceptExec()
+          const cmd = (info.command || '').trim()
+          if (cmd === 'true' || cmd === ':') {
+            ch.exit(0); ch.close()
+          } else if (cmd.startsWith('systemctl')) {
+            ch.write(SYSTEMD_SAMPLE)
+            ch.exit(0); ch.close()
+          } else {
+            ch.stderr.write(`mock: ${cmd.split(' ')[0]}: command not found\n`)
+            ch.exit(127); ch.close()
+          }
+        })
+      })
+      // 端口转发 forwardOut（direct-tcpip）：把流量接进 mock 的回声服务，
+      // 用于验证"本地监听 → forwardOut → 流对接"整条链路
+      client.on('tcpip', (accept, _reject, info) => {
+        const ch = accept()
+        ch.write(`[mock-tcpip dest=${info.destIP}:${info.destPort} src=${info.srcIP}:${info.srcPort}]\n`)
+        ch.on('data', (d) => ch.write(d))
+        ch.on('error', () => {})
       })
     })
   }
 )
+
+// systemctl 样例输出：与真实格式一致（UNIT LOAD ACTIVE SUB DESCRIPTION）
+// 供服务面板解析契约测试使用（parts[2] 才是 ACTIVE）
+const SYSTEMD_SAMPLE = [
+  'nginx.service    loaded active   running  A high performance web server',
+  'gunicorn.service loaded active   running  Gunicorn daemon for student_emergency',
+  'mysql.service    loaded active   running  MySQL Community Server',
+  'sshd.service     loaded active   running  OpenBSD Secure Shell server',
+  'docker.service   loaded inactive dead     Docker Application Container Engine',
+  'broken.service   loaded failed   failed  Some broken unit'
+].join('\n') + '\n'
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[mock-ssh] listening 127.0.0.1:${PORT}  sandbox=${SANDBOX}`)
