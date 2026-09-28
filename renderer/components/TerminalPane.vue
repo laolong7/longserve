@@ -23,7 +23,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { useTerminalStore } from '../stores/terminals'
 import { useConfigStore } from '../stores/config'
-import { applyAppearance } from '../utils/appearance'
+import { getTermTheme } from '../utils/appearance'
 
 const props = defineProps({
   tab: { type: Object, required: true },
@@ -160,17 +160,12 @@ watch(
     if (newId !== lastConnId && newId) bindConn(newId)
   }
 )
-// 外观设置变化：终端背景/前景/光标/字号实时跟随
+// 外观设置变化：终端背景/前景/光标/选区/字号实时跟随
 watch(
   () => config.appearance,
   (a) => {
     if (!term) return
-    const t = applyAppearance(a)
-    if (t) {
-      term.options.theme = { ...term.options.theme, background: t.background, foreground: t.foreground, cursor: t.cursor }
-    } else {
-      term.options.theme = { ...term.options.theme, background: '#14161b', foreground: '#d8dce4', cursor: '#3fdc97' }
-    }
+    term.options.theme = getTermTheme(a)
     const fs = a && a.termFontSize ? Number(a.termFontSize) : 14
     if (term.options.fontSize !== fs) {
       term.options.fontSize = fs
@@ -208,29 +203,7 @@ onMounted(() => {
     cursorBlink: true,
     scrollback: 5000,
     allowProposedApi: true,
-    theme: {
-      background: '#14161b',
-      foreground: '#d8dce4',
-      cursor: '#3fdc97',
-      cursorAccent: '#14161b',
-      selectionBackground: 'rgba(110,168,254,0.30)',
-      black: '#282c34',
-      red: '#e06c75',
-      green: '#98c379',
-      yellow: '#e5c07b',
-      blue: '#61afef',
-      magenta: '#c678dd',
-      cyan: '#56b6c2',
-      white: '#dcdfe4',
-      brightBlack: '#5c6370',
-      brightRed: '#f2777a',
-      brightGreen: '#99cc99',
-      brightYellow: '#ffcc66',
-      brightBlue: '#6699cc',
-      brightMagenta: '#c678dd',
-      brightCyan: '#66cccc',
-      brightWhite: '#ffffff'
-    }
+    theme: getTermTheme(config.appearance) // 主题由外观系统统一生成（背景吃色相与透明度）
   })
   fitAddon = new FitAddon()
   term.loadAddon(fitAddon)

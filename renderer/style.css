@@ -36,7 +36,7 @@
 * { box-sizing: border-box; }
 
 /* html 深色兜底：透明度调节时所有面板透出的是深底而不是白底，全局视觉统一 */
-html { background: #0e1013; }
+html { background: var(--backdrop, #0e1013); } /* --backdrop 由外观系统生成（色相辉光渐变） */
 
 html, body, #app {
   height: 100%;

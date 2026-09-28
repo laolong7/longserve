@@ -1,10 +1,17 @@
 // ============================================================
 // 外观系统：由 appearance 配置动态生成全部 CSS 变量
 // a: { accent, text, bgHue, bgAlpha, termFontSize } 或 null（默认）
+// 设计要点：
+//   - 背景色相饱和度 26~34%，保证色相滑块肉眼可见（16% 太灰等于没反应）
+//   - bgHue 允许 0（Number(x)||222 会把 0 当假值，属历史 bug）
+//   - 透明度要有参照物才看得见：html 底改为随色相的辉光渐变，
+//     面板/终端半透明后透出光晕，低透明度才有"通透"感
+//   - 终端背景/前景/光标/选区跟随同一套外观（工作页面最大面积）
 // ============================================================
 
 // style.css 里的默认值（恢复默认时用）
 const DEFAULTS = [
+  ['--backdrop', '#0e1013'],
   ['--bg0', '#14161b'],
   ['--bg1', '#191c22'],
   ['--bg2', '#20242c'],
@@ -17,6 +24,31 @@ const DEFAULTS = [
   ['--green', '#3fdc97'],
   ['--green-dim', 'rgba(63, 220, 151, 0.14)']
 ]
+
+// 终端基础主题（one-dark 风格；ANSI 内容色保留各自色相，保证红=错绿=对）
+const TERM_BASE = {
+  background: '#14161b',
+  foreground: '#d8dce4',
+  cursor: '#3fdc97',
+  cursorAccent: '#14161b',
+  selectionBackground: 'rgba(110, 168, 254, 0.30)',
+  black: '#282c34',
+  red: '#e06c75',
+  green: '#98c379',
+  yellow: '#e5c07b',
+  blue: '#61afef',
+  magenta: '#c678dd',
+  cyan: '#56b6c2',
+  white: '#dcdfe4',
+  brightBlack: '#5c6370',
+  brightRed: '#f2777a',
+  brightGreen: '#99cc99',
+  brightYellow: '#ffcc66',
+  brightBlue: '#6699cc',
+  brightMagenta: '#c678dd',
+  brightCyan: '#66cccc',
+  brightWhite: '#ffffff'
+}
 
 export const APPEARANCE_PRESETS = [
   { name: '磷光绿（默认）', accent: '#3fdc97', text: '#d8dce4', bgHue: 222 },
@@ -33,24 +65,36 @@ function hexToRgba(hex, alpha) {
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`
 }
 
-// 应用到 CSS 变量，返回给 xterm 用的主题片段（null=默认）
+// 解析外观项；hue 用 Number.isFinite 判定，0° 是合法值
+function parseAppearance(a) {
+  const { accent = '#3fdc97', text = '#d8dce4', bgHue = 222, bgAlpha = 100 } = a
+  const alpha = Math.min(100, Math.max(30, Number(bgAlpha) || 100)) / 100
+  const h = Number.isFinite(Number(bgHue)) ? Number(bgHue) : 222
+  return { accent, text, h, alpha }
+}
+
+// 应用到 CSS 变量
 export function applyAppearance(a) {
   const root = document.documentElement
   if (!a) {
     for (const [k, v] of DEFAULTS) root.style.setProperty(k, v)
-    return null
+    return
   }
-  const { accent = '#3fdc97', text = '#d8dce4', bgHue = 222, bgAlpha = 100 } = a
-  const alpha = Math.min(100, Math.max(30, Number(bgAlpha) || 100)) / 100
-  const h = Number(bgHue) || 222
+  const { accent, text, h, alpha } = parseAppearance(a)
 
-  const bg = (l) => `hsla(${h}, 16%, ${l}%, ${alpha})`
+  // html 底：随色相的辉光渐变（比面板略亮），透明度降低时光晕透出来
+  root.style.setProperty(
+    '--backdrop',
+    `radial-gradient(130% 100% at 75% -15%, hsl(${h}, 38%, 17%), hsl(${h}, 26%, 10%) 65%)`
+  )
+
+  const bg = (l) => `hsla(${h}, 26%, ${l}%, ${alpha})`
   root.style.setProperty('--bg0', bg(8))
   root.style.setProperty('--bg1', bg(11))
   root.style.setProperty('--bg2', bg(14))
   root.style.setProperty('--bg3', bg(19))
-  root.style.setProperty('--border', `hsla(${h}, 18%, 24%, ${Math.min(1, alpha + 0.1)})`)
-  root.style.setProperty('--border-strong', `hsla(${h}, 18%, 32%, ${Math.min(1, alpha + 0.1)})`)
+  root.style.setProperty('--border', `hsla(${h}, 22%, 24%, ${Math.min(1, alpha + 0.1)})`)
+  root.style.setProperty('--border-strong', `hsla(${h}, 22%, 32%, ${Math.min(1, alpha + 0.1)})`)
 
   root.style.setProperty('--green', accent)
   root.style.setProperty('--green-dim', hexToRgba(accent, 0.14))
@@ -58,10 +102,18 @@ export function applyAppearance(a) {
   root.style.setProperty('--text', text)
   root.style.setProperty('--text-dim', hexToRgba(text, 0.62))
   root.style.setProperty('--text-faint', hexToRgba(text, 0.4))
+}
 
+// 终端主题片段（xterm 用）：null=默认。背景同样吃色相与透明度
+export function getTermTheme(a) {
+  if (!a) return { ...TERM_BASE }
+  const { accent, text, h, alpha } = parseAppearance(a)
   return {
-    background: `hsl(${h}, 16%, 8%)`, // 终端背景保持不透明保证可读
+    ...TERM_BASE,
+    background: `hsla(${h}, 26%, 8%, ${alpha})`, // 与 --bg0 同步，半透明可透出辉光底
     foreground: text,
-    cursor: accent
+    cursor: accent,
+    cursorAccent: `hsl(${h}, 26%, 8%)`,
+    selectionBackground: hexToRgba(accent, 0.3)
   }
 }
