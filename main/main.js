@@ -11,7 +11,6 @@ const SshManager = require('./ssh-manager')
 const SftpManager = require('./sftp-manager')
 const aiProxy = require('./ai-proxy')
 
-let win = null
 let sshManager = null
 let sftpManager = null
 
@@ -21,24 +20,51 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.on('second-instance', () => {
-  if (win) {
-    if (win.isMinimized()) win.restore()
-    win.focus()
-  }
+  // 再次双击 exe：不再聚焦旧窗口，而是新开一个平铺窗口（多开并列）
+  if (app.isReady()) createWindow({ cascade: true })
 })
 
-function createWindow() {
-  // 初始尺寸自适应屏幕（90%），避免小屏溢出
+const wins = new Set() // 多窗口：每个 BrowserWindow 都能各自开终端
+
+// 窗口效果：none=不透明 / acrylic=Win11 磨砂 / transparent=真透明（看到桌面）
+function currentEffect() {
+  try {
+    const a = store.load().appearance
+    return (a && a.windowEffect) || 'none'
+  } catch { return 'none' }
+}
+
+function createWindow(opts = {}) {
   const { screen } = require('electron')
   const wa = screen.getPrimaryDisplay().workAreaSize
-  win = new BrowserWindow({
-    width: Math.min(1440, Math.floor(wa.width * 0.92)),
-    height: Math.min(900, Math.floor(wa.height * 0.92)),
+  const width = Math.min(1440, Math.floor(wa.width * 0.92))
+  const height = Math.min(900, Math.floor(wa.height * 0.92))
+  const effect = currentEffect()
+
+  // 多开平铺：新窗口错开到原窗口右侧，放不下则下移一行
+  let x
+  let y
+  if (opts.cascade && wins.size) {
+    const prev = [...wins][wins.size - 1].getBounds()
+    x = prev.x + prev.width + 8
+    y = prev.y + 28
+    if (x + width > wa.x + wa.width) { x = wa.x + 16; y = prev.y + prev.height + 8 }
+    if (y + height > wa.y + wa.height) y = wa.y + 16
+  }
+
+  const win = new BrowserWindow({
+    width,
+    height,
+    x,
+    y,
     minWidth: 1080,
     minHeight: 640,
-    title: '牢笼服务器工具',
-    backgroundColor: '#131519',
+    title: 'Laolong Server Utilities',
+    backgroundColor: effect === 'none' ? '#131519' : '#00000000',
     autoHideMenuBar: true,
+    frame: false, // 自绘标题栏（真透明/磨砂必需）
+    ...(effect === 'transparent' ? { transparent: true } : {}),
+    ...(effect === 'acrylic' ? { backgroundMaterial: 'acrylic' } : {}),
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload.js'),
       contextIsolation: true,
@@ -47,9 +73,15 @@ function createWindow() {
       spellcheck: false
     }
   })
+  wins.add(win)
 
   // 阻止拖拽文件到窗口触发默认导航
   win.webContents.on('will-navigate', e => e.preventDefault())
+
+  // 最大化状态变化通知渲染层（标题栏图标切换）
+  const emitMax = () => send('win:maximized-changed', win.isMaximized())
+  win.on('maximize', emitMax)
+  win.on('unmaximize', emitMax)
 
   // 开发模式：渲染层 console 转发到主进程 stdout，便于自检
   if (!app.isPackaged) {
@@ -57,34 +89,23 @@ function createWindow() {
       const message = event && event.message
       if (message) console.log('[renderer]', message)
     })
-    // 布局诊断：页面截图（自检用，仅开发模式）
-    win.webContents.on('did-finish-load', () => {
-      setTimeout(async () => {
-        try {
-          const fs = require('fs')
-          const img = await win.webContents.capturePage()
-          fs.writeFileSync(path.join(app.getPath('temp'), 'laogtool_page.png'), img.toPNG())
-          console.log('[diag] page captured')
-        } catch (err) {
-          console.log('[diag-capture-err]', err.message)
-        }
-      }, 2500)
-    })
   }
 
   if (!app.isPackaged) {
     win.loadURL('http://127.0.0.1:5173')
-    // win.webContents.openDevTools({ mode: 'detach' })
   } else {
     win.loadFile(path.join(__dirname, '..', 'renderer', 'dist', 'index.html'))
   }
 
-  win.on('closed', () => { win = null })
+  win.on('closed', () => { wins.delete(win) })
+  return win
 }
 
-// 主进程 → 渲染层事件转发器
+// 主进程 → 渲染层事件转发器（多窗口广播：各窗口只关心自己订阅的 connId）
 function send(channel, payload) {
-  if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
+  for (const w of wins) {
+    if (!w.isDestroyed()) w.webContents.send(channel, payload)
+  }
 }
 
 function registerIpc() {
@@ -243,6 +264,23 @@ function registerIpc() {
     } catch (err) { return { ok: false, error: err.message } }
   })
   ipcMain.handle('local:desktop', () => app.getPath('desktop'))
+
+  // ---------- 窗口控制（自绘标题栏） ----------
+  ipcMain.on('win:minimize', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
+  ipcMain.on('win:maximize', (e) => {
+    const w = BrowserWindow.fromWebContents(e.sender)
+    if (!w) return
+    if (w.isMaximized()) w.unmaximize()
+    else w.maximize()
+  })
+  ipcMain.on('win:close', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
+  ipcMain.on('win:new', () => createWindow({ cascade: true }))
+  ipcMain.handle('win:is-maximized', (e) => !!BrowserWindow.fromWebContents(e.sender)?.isMaximized())
+  // 窗口效果是原生窗口属性，热切换不了：保存后重启应用生效
+  ipcMain.on('app:relaunch', () => {
+    app.relaunch()
+    app.exit(0)
+  })
 
   ipcMain.handle('ai:chat', async (_e, opts) => {
     // opts: { eventId, provider: {baseUrl, apiKey, model}, body: OpenAI 请求体 }

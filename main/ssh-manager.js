@@ -20,6 +20,9 @@ class SshManager {
     return new Promise((resolve, reject) => {
       const connId = `conn_${Date.now()}_${++this.seq}`
       const conn = new Client()
+      // 连接阶段日志：真实转发给渲染层，连接动画里可见
+      const stage = (msg) => this.send(`conn:stage:${connId}`, msg)
+      stage(`解析地址 ${instance.host}:${instance.port || 22} …`)
       const meta = {
         conn,
         shellStream: null,
@@ -37,12 +40,16 @@ class SshManager {
         reject(new Error(this.humanError(err)))
       }
 
+      conn.on('handshake', () => stage('TCP 已连通，SSH 握手…'))
+      conn.on('banner', () => stage('收到服务器横幅，身份认证中…'))
       conn.on('ready', () => {
+        stage('认证通过，正在打开终端会话…')
         conn.shell(
           { term: 'xterm-256color', cols: 120, rows: 30 },
           (err, stream) => {
             if (err) { fail(err); this.close(connId); return }
             meta.shellStream = stream
+            stage('终端就绪 ✓')
 
             stream.on('data', (d) => {
               if (!meta.attached) {
@@ -79,6 +86,7 @@ class SshManager {
 
       // keyboard-interactive 认证兜底（部分服务器禁用直发密码）
       conn.on('keyboard-interactive', (_name, _instr, _lang, _prompts, finish) => {
+        stage('服务器要求交互式认证，提交凭据…')
         finish([instance.password])
       })
 

@@ -5,8 +5,18 @@
     <!-- 连接中 / 断线覆盖层 -->
     <div v-if="tab.status !== 'connected'" class="pane-overlay">
       <template v-if="tab.status === 'connecting'">
-        <div class="dot mid"></div>
-        <div>正在连接 {{ tab.instance.host }}:{{ tab.instance.port }} ...</div>
+        <div class="conn-anim">
+          <div class="conn-ring"></div>
+          <div class="conn-ring delay"></div>
+        </div>
+        <div class="conn-title">正在连接 {{ tab.instance.host }}:{{ tab.instance.port }}</div>
+        <!-- 真实连接阶段日志（来自 ssh2 事件流） -->
+        <div class="conn-log">
+          <div v-for="(line, i) in connLog" :key="i" class="conn-line" :class="{ last: i === connLog.length - 1 }">
+            <span class="conn-tick">{{ i === connLog.length - 1 && tab.status === 'connecting' ? '›' : '✓' }}</span>{{ line }}
+          </div>
+          <div v-if="!connLog.length" class="conn-line faint">初始化…</div>
+        </div>
       </template>
       <template v-else>
         <div class="overlay-title">{{ tab.error || '连接已断开' }}</div>
@@ -39,6 +49,9 @@ let fitAddon = null
 let resizeObserver = null
 let unsubData = null
 let unsubClose = null
+let unsubStage = null
+// 连接阶段日志（ssh2 真实事件流，连接动画里滚动展示）
+const connLog = ref([])
 let lastConnId = null
 
 // ---------- 环形缓冲：AI 读取的兜底通道（保留最近输出，剥离 ANSI） ----------
@@ -123,10 +136,15 @@ function fit() {
 function bindConn(connId) {
   if (unsubData) { unsubData(); unsubData = null }
   if (unsubClose) { unsubClose(); unsubClose = null }
+  if (unsubStage) { unsubStage(); unsubStage = null }
+  connLog.value = []
   lastConnId = connId
   if (!connId || !connId.startsWith('conn_')) return
 
   ;(async () => {
+    unsubStage = window.api.on(`conn:stage:${connId}`, (msg) => {
+      connLog.value.push(msg)
+    })
     // 先订阅事件再 attach：attach 返回的缓冲之后不会有重复数据
     unsubData = window.api.on(`term:data:${connId}`, (data) => {
       const u8 = toU8(data)
@@ -240,6 +258,7 @@ onBeforeUnmount(() => {
   store.unregisterPane(props.tab)
   if (unsubData) unsubData()
   if (unsubClose) unsubClose()
+  if (unsubStage) unsubStage()
   if (resizeObserver) resizeObserver.disconnect()
   if (term) term.dispose()
 })
@@ -265,4 +284,49 @@ onBeforeUnmount(() => {
   font-size: 14px;
 }
 .overlay-title { color: var(--red); font-size: 15px; margin-bottom: 2px; }
+
+/* 连接动画：双环呼吸旋转 */
+.conn-anim {
+  position: relative;
+  width: 44px;
+  height: 44px;
+}
+.conn-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--green);
+  animation: conn-spin 1s linear infinite;
+}
+.conn-ring.delay {
+  inset: 8px;
+  border-top-color: var(--blue);
+  animation-duration: 1.5s;
+  animation-direction: reverse;
+}
+@keyframes conn-spin { to { transform: rotate(360deg); } }
+.conn-title { color: var(--text); font-size: 14px; }
+.conn-log {
+  margin-top: 10px;
+  max-width: 420px;
+  max-height: 160px;
+  overflow-y: auto;
+  font-family: 'Cascadia Mono', 'Consolas', monospace;
+  font-size: 11.5px;
+  text-align: left;
+}
+.conn-line {
+  color: var(--text-dim);
+  padding: 1px 0;
+  display: flex;
+  gap: 6px;
+}
+.conn-line.last { color: var(--green); animation: conn-pulse 1.4s ease-in-out infinite; }
+.conn-line.faint { color: var(--text-faint); }
+.conn-tick { width: 12px; flex-shrink: 0; }
+@keyframes conn-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
 </style>

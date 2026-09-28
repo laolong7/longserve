@@ -170,6 +170,33 @@
               <label>终端字号：<span class="mono">{{ draftFs }}px</span></label>
               <input type="range" min="11" max="20" v-model.number="draftFs" @input="updateAppearance" style="width:100%" />
             </div>
+            <div class="form-2col">
+              <div class="form-row">
+                <label>终端背景色（默认跟随全局）</label>
+                <div style="display:flex; gap:6px; align-items:center">
+                  <input type="color" :value="draftTermBg || '#14161b'" @input="draftTermBg = $event.target.value; updateAppearance()" style="width:46px; padding:2px" />
+                  <button class="ghost" @click="draftTermBg = ''; updateAppearance()">跟随全局</button>
+                </div>
+              </div>
+              <div class="form-row">
+                <label>终端文字色（默认跟随全局）</label>
+                <div style="display:flex; gap:6px; align-items:center">
+                  <input type="color" :value="draftTermFg || '#d8dce4'" @input="draftTermFg = $event.target.value; updateAppearance()" style="width:46px; padding:2px" />
+                  <button class="ghost" @click="draftTermFg = ''; updateAppearance()">跟随全局</button>
+                </div>
+              </div>
+            </div>
+            <div class="form-row">
+              <label>窗口效果（真透明可看到桌面壁纸）</label>
+              <div style="display:flex; gap:8px">
+                <button
+                  v-for="opt in EFFECTS"
+                  :key="opt.value"
+                  :class="{ primary: draftEffect === opt.value }"
+                  @click="draftEffect = opt.value; updateAppearance(true)"
+                >{{ opt.label }}</button>
+              </div>
+            </div>
             <div class="form-actions">
               <button @click="resetAppearance">恢复默认</button>
               <div class="grow"></div>
@@ -324,6 +351,15 @@ const draftText = ref('#d8dce4')
 const draftHue = ref(222)
 const draftAlpha = ref(100)
 const draftFs = ref(14)
+const draftTermBg = ref('')
+const draftTermFg = ref('')
+const draftEffect = ref('none')
+
+const EFFECTS = [
+  { value: 'none', label: '不透明' },
+  { value: 'acrylic', label: '磨砂玻璃' },
+  { value: 'transparent', label: '真透明' }
+]
 
 function syncDrafts() {
   const a = config.appearance
@@ -332,19 +368,31 @@ function syncDrafts() {
   draftHue.value = a?.bgHue ?? 222
   draftAlpha.value = a?.bgAlpha ?? 100
   draftFs.value = a?.termFontSize ?? 14
+  draftTermBg.value = a?.termBg || ''
+  draftTermFg.value = a?.termFg || ''
+  draftEffect.value = a?.windowEffect || 'none'
 }
 watch(tab, (t) => { if (t === 'appearance') syncDrafts() })
 
-function updateAppearance() {
+function updateAppearance(effectChanged = false) {
+  const effect = draftEffect.value
+  const prevEffect = config.appearance?.windowEffect || 'none'
   const a = {
     accent: draftAccent.value,
     text: draftText.value,
     bgHue: draftHue.value,
     bgAlpha: draftAlpha.value,
-    termFontSize: draftFs.value
+    termFontSize: draftFs.value,
+    termBg: draftTermBg.value,
+    termFg: draftTermFg.value,
+    windowEffect: effect
   }
   config.appearance = a
   config.save()
+  // 窗口效果是原生窗口属性，无法热切换：改了就重启应用生效
+  if (effectChanged && effect !== prevEffect) {
+    setTimeout(() => window.api.appRelaunch(), 600)
+  }
 }
 function applyPreset(p) {
   draftAccent.value = p.accent
@@ -357,9 +405,11 @@ function isPresetActive(p) {
   return a && a.accent === p.accent && a.bgHue === p.bgHue
 }
 function resetAppearance() {
+  const prevEffect = config.appearance?.windowEffect || 'none'
   config.appearance = null
   config.save()
   syncDrafts()
+  if (prevEffect !== 'none') setTimeout(() => window.api.appRelaunch(), 600)
 }
 
 // ---------- 技能 ----------

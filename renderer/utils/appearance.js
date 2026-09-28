@@ -67,10 +67,10 @@ function hexToRgba(hex, alpha) {
 
 // 解析外观项；hue 用 Number.isFinite 判定，0° 是合法值
 function parseAppearance(a) {
-  const { accent = '#3fdc97', text = '#d8dce4', bgHue = 222, bgAlpha = 100 } = a
+  const { accent = '#3fdc97', text = '#d8dce4', bgHue = 222, bgAlpha = 100, termBg, termFg, windowEffect = 'none' } = a
   const alpha = Math.min(100, Math.max(30, Number(bgAlpha) || 100)) / 100
   const h = Number.isFinite(Number(bgHue)) ? Number(bgHue) : 222
-  return { accent, text, h, alpha }
+  return { accent, text, h, alpha, termBg: termBg || '', termFg: termFg || '', windowEffect }
 }
 
 // 应用到 CSS 变量
@@ -80,13 +80,22 @@ export function applyAppearance(a) {
     for (const [k, v] of DEFAULTS) root.style.setProperty(k, v)
     return
   }
-  const { accent, text, h, alpha } = parseAppearance(a)
+  const { accent, text, h, alpha, windowEffect } = parseAppearance(a)
 
-  // html 底：随色相的辉光渐变（比面板略亮），透明度降低时光晕透出来
-  root.style.setProperty(
-    '--backdrop',
-    `radial-gradient(130% 100% at 75% -15%, hsl(${h}, 38%, 17%), hsl(${h}, 26%, 10%) 65%)`
-  )
+  // html 底：
+  //   none       = 随色相辉光渐变（不透明窗口）
+  //   acrylic    = 很淡的一层色相底（主要质感来自系统磨砂）
+  //   transparent= 完全不画底，直接看到桌面壁纸（真透明）
+  if (windowEffect === 'transparent') {
+    root.style.setProperty('--backdrop', 'transparent')
+  } else if (windowEffect === 'acrylic') {
+    root.style.setProperty('--backdrop', `hsla(${h}, 30%, 12%, 0.35)`)
+  } else {
+    root.style.setProperty(
+      '--backdrop',
+      `radial-gradient(130% 100% at 75% -15%, hsl(${h}, 38%, 17%), hsl(${h}, 26%, 10%) 65%)`
+    )
+  }
 
   const bg = (l) => `hsla(${h}, 26%, ${l}%, ${alpha})`
   root.style.setProperty('--bg0', bg(8))
@@ -104,16 +113,17 @@ export function applyAppearance(a) {
   root.style.setProperty('--text-faint', hexToRgba(text, 0.4))
 }
 
-// 终端主题片段（xterm 用）：null=默认。背景同样吃色相与透明度
+// 终端主题片段（xterm 用）：null=默认。
+// 背景/前景优先用独立的 termBg/termFg（外观设置可单独调），留空则跟随全局
 export function getTermTheme(a) {
   if (!a) return { ...TERM_BASE }
-  const { accent, text, h, alpha } = parseAppearance(a)
+  const { accent, text, h, alpha, termBg, termFg } = parseAppearance(a)
   return {
     ...TERM_BASE,
-    background: `hsla(${h}, 26%, 8%, ${alpha})`, // 与 --bg0 同步，半透明可透出辉光底
-    foreground: text,
+    background: termBg ? hexToRgba(termBg, alpha) : `hsla(${h}, 26%, 8%, ${alpha})`,
+    foreground: termFg || text,
     cursor: accent,
-    cursorAccent: `hsl(${h}, 26%, 8%)`,
+    cursorAccent: termBg ? termBg : `hsl(${h}, 26%, 8%)`,
     selectionBackground: hexToRgba(accent, 0.3)
   }
 }

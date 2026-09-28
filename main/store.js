@@ -14,6 +14,25 @@ let cache = null
 function init(app) {
   configFile = path.join(app.getPath('userData'), 'config.json')
   historyFile = path.join(app.getPath('userData'), 'history.json')
+  migrateFromLegacyName(app)
+}
+
+// 产品名改为 Laolong Server Utilities 后 userData 目录随之变化，
+// 首次启动时把旧目录（牢笼服务器工具）里的配置与历史搬过来，无缝升级
+function migrateFromLegacyName(app) {
+  try {
+    if (fs.existsSync(configFile)) return // 新目录已有配置，无需迁移
+    const legacyDir = path.join(app.getPath('appData'), '牢笼服务器工具')
+    const legacyConfig = path.join(legacyDir, 'config.json')
+    if (!fs.existsSync(legacyConfig)) return
+    fs.mkdirSync(path.dirname(configFile), { recursive: true })
+    fs.copyFileSync(legacyConfig, configFile)
+    const legacyHistory = path.join(legacyDir, 'history.json')
+    if (fs.existsSync(legacyHistory)) fs.copyFileSync(legacyHistory, historyFile)
+    console.log('[store] 已从旧配置目录迁移数据')
+  } catch (err) {
+    console.log('[store] 配置迁移失败（不影响启动）:', err.message)
+  }
 }
 
 function defaults() {

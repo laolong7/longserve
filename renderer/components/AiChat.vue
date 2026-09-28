@@ -11,10 +11,9 @@
       >
         <option value="" disabled>选择 AI 配置</option>
         <option v-for="p in config.aiProviders" :key="p.id" :value="p.id">
-          {{ p.name }}{{ p.model ? ' · ' + p.model : '' }}
+          {{ p.name }}
         </option>
       </select>
-      <button class="ghost icon-sm" title="AI 设置" @click="emit('open-settings')">⚙</button>
       <button class="ghost icon-sm" title="历史会话记录" @click="emit('open-history')">📜</button>
       <button class="ghost icon-sm" title="清空对话" :disabled="ai.running" @click="ai.clear()">🗑</button>
     </div>
@@ -61,7 +60,11 @@
               </div>
             </div>
 
-            <div v-if="ai.running && m.status === 'streaming'" class="thinking">…</div>
+            <!-- 思考中动画：仅在还没吐字时显示 -->
+            <div v-if="ai.running && m.status === 'streaming' && !m.content && !m.toolCalls.length" class="thinking">
+              <span class="th-dot"></span><span class="th-dot"></span><span class="th-dot"></span>
+              <span class="th-text">思考中</span>
+            </div>
           </div>
         </div>
       </template>
@@ -249,7 +252,36 @@ function mdRender(text) {
   margin-left: 2px;
 }
 @keyframes blink { 50% { opacity: 0; } }
-.thinking { color: var(--text-faint); font-size: 11.5px; margin-top: 6px; }
+/* 思考动画：三个圆点错相位起伏 + 渐隐文字 */
+.thinking {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+}
+.th-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--violet);
+  animation: th-bounce 1.2s ease-in-out infinite;
+}
+.th-dot:nth-child(2) { animation-delay: 0.15s; opacity: 0.75; }
+.th-dot:nth-child(3) { animation-delay: 0.3s; opacity: 0.5; }
+.th-text {
+  color: var(--text-faint);
+  font-size: 11.5px;
+  margin-left: 4px;
+  animation: th-fade 1.6s ease-in-out infinite;
+}
+@keyframes th-bounce {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-4px); }
+}
+@keyframes th-fade {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
 
 /* 工具卡片 */
 .tool-card {

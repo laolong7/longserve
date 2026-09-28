@@ -5,7 +5,7 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
 // 允许订阅的事件通道白名单（前缀匹配）
-const EVENT_PREFIXES = ['term:data:', 'term:close:', 'sftp:progress:', 'ai:delta:', 'ai:done:', 'ai:error:']
+const EVENT_PREFIXES = ['term:data:', 'term:close:', 'conn:stage:', 'sftp:progress:', 'ai:delta:', 'ai:done:', 'ai:error:']
 
 function isAllowedChannel(ch) {
   return EVENT_PREFIXES.some((p) => ch.startsWith(p))
@@ -59,6 +59,19 @@ contextBridge.exposeInMainWorld('api', {
   // ---------- 系统 ----------
   filePathForDrop: (file) => {
     try { return webUtils.getPathForFile(file) } catch { return null }
+  },
+
+  // ---------- 窗口控制（自绘标题栏用） ----------
+  winMinimize: () => ipcRenderer.send('win:minimize'),
+  winMaximize: () => ipcRenderer.send('win:maximize'),
+  winClose: () => ipcRenderer.send('win:close'),
+  winNew: () => ipcRenderer.send('win:new'),
+  winIsMaximized: () => ipcRenderer.invoke('win:is-maximized'),
+  appRelaunch: () => ipcRenderer.send('app:relaunch'),
+  onWinMaximizeChanged: (cb) => {
+    const listener = (_e, v) => cb(v)
+    ipcRenderer.on('win:maximized-changed', listener)
+    return () => ipcRenderer.removeListener('win:maximized-changed', listener)
   },
 
   // ---------- 事件订阅 ----------

@@ -1,7 +1,7 @@
 {
   "name": "laoji-server-tool",
-  "productName": "牢笼服务器工具",
-  "version": "1.3.2",
+  "productName": "Laolong Server Utilities",
+  "version": "1.4.0",
   "description": "带 AI 副驾的服务器终端管理工具",
   "main": "main/main.js",
   "author": "牢笼 & 逐光",
@@ -29,7 +29,7 @@
   },
   "build": {
     "appId": "com.laoji.servertool",
-    "productName": "牢笼服务器工具",
+    "productName": "Laolong Server Utilities",
     "directories": {
       "output": "release"
     },
