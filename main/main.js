@@ -67,6 +67,7 @@ function createWindow(opts = {}) {
     minWidth: 1080,
     minHeight: 640,
     title: 'Laolong Server Utilities',
+    icon: path.join(__dirname, '..', 'build', 'icon.ico'), // 任务栏/窗口图标（打包后 exe 图标由 electron-builder 嵌入）
     backgroundColor: effect === 'none' ? '#131519' : '#00000000',
     autoHideMenuBar: true,
     frame: false, // 自绘标题栏（真透明/磨砂必需）
