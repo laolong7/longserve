@@ -183,6 +183,7 @@ export const useAiStore = defineStore('ai', {
 
     abort() {
       if (this._activeEventId) window.api.aiAbort(this._activeEventId)
+      this._typingAbort = true // 同时中断正在打字的命令
     },
 
     // ---------- 历史会话 ----------
@@ -282,6 +283,7 @@ export const useAiStore = defineStore('ai', {
       const config = useConfigStore()
       const terminals = useTerminalStore()
       this.running = true
+      this._typingAbort = false // 每轮循环重置打字中断标记
 
       try {
         for (let hop = 0; hop < 8; hop++) {
@@ -561,9 +563,25 @@ export const useAiStore = defineStore('ai', {
         if (this.sessionMeta) this.sessionMeta.hasDanger = true
       }
 
-      // 打字到可见终端（服务器回显，用户全程可见）
-      terminals.writeActive(cmd + '\r')
+      // 流式打字到可见终端：逐块输入模拟手敲节奏（服务器回显，用户全程可见）
+      const typed = await this.typeIntoTerminal(cmd)
+      if (!typed) return '[已中止] 用户停止了输入，命令未执行完毕'
       return `命令已输入终端执行：${cmd}。请用 read_terminal 查看执行结果。`
+    },
+
+    // 逐块写入终端，模拟真人打字速度；用户点"停止"可中断
+    async typeIntoTerminal(cmd) {
+      const terminals = useTerminalStore()
+      const CHUNK = 3   // 每次写入字符数
+      const DELAY = 16  // 间隔 ms（60 字符命令约 0.3s，观感为快速打字）
+      for (let i = 0; i < cmd.length; i += CHUNK) {
+        if (this._typingAbort) return false
+        terminals.writeActive(cmd.slice(i, i + CHUNK))
+        await new Promise((r) => setTimeout(r, DELAY))
+      }
+      if (this._typingAbort) return false
+      terminals.writeActive('\r') // 回车执行
+      return true
     }
   }
 })

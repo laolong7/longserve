@@ -45,6 +45,11 @@
         </div>
       </div>
     </div>
+
+    <!-- 轻提示 toast -->
+    <Transition name="toast">
+      <div v-if="dlg.toast" class="toast">{{ dlg.toast }}</div>
+    </Transition>
   </Teleport>
 </template>
 
@@ -105,4 +110,21 @@ watch(() => dlg.promptVisible, (v) => {
   padding: 12px 16px;
   border-top: 1px solid var(--border);
 }
+
+/* 轻提示 toast：右下角，淡入淡出 */
+.toast {
+  position: fixed;
+  right: 24px;
+  bottom: 28px;
+  background: var(--bg2);
+  border: 1px solid rgba(63, 220, 151, 0.45);
+  color: var(--green);
+  border-radius: var(--radius);
+  padding: 10px 18px;
+  font-size: 13px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  z-index: 400;
+}
+.toast-enter-active, .toast-leave-active { transition: opacity 0.25s, transform 0.25s; }
+.toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(8px); }
 </style>

@@ -258,9 +258,11 @@
 <script setup>
 import { ref, reactive, watch } from 'vue'
 import { useConfigStore } from '../stores/config'
+import { useDialogStore } from '../stores/dialog'
 import { APPEARANCE_PRESETS } from '../utils/appearance'
 
 const config = useConfigStore()
+const dialog = useDialogStore()
 const visible = ref(false)
 const tab = ref('instances')
 const editingId = ref(null)
@@ -338,8 +340,8 @@ async function saveSkill() {
   if (idx >= 0) config.skills[idx] = data
   else config.skills.push(data)
   await config.save()
-  editingId.value = data.id
-  form.value = { ...data }
+  dialog.showToast('技能已保存')
+  close() // 保存成功离开编辑界面
 }
 async function removeSkillCurrent() {
   const id = editingId.value
@@ -403,8 +405,8 @@ async function saveInstance() {
   if (idx >= 0) config.instances[idx] = data
   else config.instances.push(data)
   await config.save()
-  editingId.value = data.id
-  form.value = { ...data }
+  dialog.showToast('服务器配置已保存')
+  close() // 保存成功离开编辑界面
 }
 function removeInstanceCurrent() {
   const id = editingId.value
@@ -449,8 +451,8 @@ async function saveProvider() {
     if (!config.activeAiProviderId) config.activeAiProviderId = data.id
   }
   await config.save()
-  editingId.value = data.id
-  form.value = { ...data }
+  dialog.showToast('AI 配置已保存')
+  close() // 保存成功离开编辑界面
 }
 function removeProviderCurrent() {
   const id = editingId.value

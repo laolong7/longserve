@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld('api', {
 
   // ---------- 本地文件 ----------
   localList: (dirPath) => ipcRenderer.invoke('local:list', dirPath),
+  localDrives: () => ipcRenderer.invoke('local:drives'),
   localHome: () => ipcRenderer.invoke('local:home'),
   localDesktop: () => ipcRenderer.invoke('local:desktop'),
   localRead: (filePath) => ipcRenderer.invoke('local:read', filePath),

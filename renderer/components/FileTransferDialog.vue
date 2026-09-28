@@ -14,6 +14,7 @@
           <div class="panel">
             <div class="panel-head">
               <span class="panel-tag">本机</span>
+              <button class="ghost btn-xs" title="此电脑（磁盘列表）" @click="listLocal('__drives__')">🖥</button>
               <button class="ghost btn-xs" title="上级目录" @click="goUp(local)">↑</button>
               <input
                 v-model="local.dirInput"
@@ -25,18 +26,23 @@
             <div class="panel-list" :class="{ dragging: dragOver === 'local' }">
               <div v-if="local.loading" class="panel-loading">读取中...</div>
               <div v-else-if="local.error" class="panel-error">{{ local.error }}</div>
-              <label
+              <div
                 v-for="e in local.entries"
                 :key="e.name"
                 class="frow"
+                :class="{ picked: local.selected.includes(e.name) }"
                 :title="e.path"
               >
-                <input type="checkbox" :value="e.name" v-model="local.selected" />
-                <span class="ficon">{{ e.isDir ? '📁' : '📄' }}</span>
-                <span class="fname ellipsis" @dblclick="enter(local, e)">{{ e.name }}</span>
-                <span class="fsize mono faint">{{ e.isDir ? '' : fmtSize(e.size) }}</span>
+                <input
+                  type="checkbox"
+                  :checked="local.selected.includes(e.name)"
+                  @click.stop="togglePick(local, e.name)"
+                />
+                <span class="ficon">{{ driveIcon(local, e) }}</span>
+                <span class="fname ellipsis" @click="openEntry(local, 'local', e)">{{ e.name }}</span>
+                <span class="fsize mono faint">{{ driveSize(local, e) || (e.isDir ? '' : fmtSize(e.size)) }}</span>
                 <span class="fmtime mono faint">{{ fmtTime(e.mtime) }}</span>
-              </label>
+              </div>
               <div v-if="!local.loading && !local.entries.length && !local.error" class="panel-loading">空目录</div>
             </div>
             <div class="panel-foot">
@@ -78,18 +84,23 @@
             <div class="panel-list" :class="{ dragging: dragOver === 'remote' }">
               <div v-if="remote.loading" class="panel-loading">读取中...</div>
               <div v-else-if="remote.error" class="panel-error">{{ remote.error }}</div>
-              <label
+              <div
                 v-for="e in remote.entries"
                 :key="e.name"
                 class="frow"
+                :class="{ picked: remote.selected.includes(e.name) }"
                 :title="e.path"
               >
-                <input type="checkbox" :value="e.name" v-model="remote.selected" />
+                <input
+                  type="checkbox"
+                  :checked="remote.selected.includes(e.name)"
+                  @click.stop="togglePick(remote, e.name)"
+                />
                 <span class="ficon">{{ e.isDir ? '📁' : '📄' }}</span>
-                <span class="fname ellipsis" @dblclick="enter(remote, e)">{{ e.name }}</span>
+                <span class="fname ellipsis" @click="openEntry(remote, 'remote', e)">{{ e.name }}</span>
                 <span class="fsize mono faint">{{ e.isDir ? '' : fmtSize(e.size) }}</span>
                 <span class="fmtime mono faint">{{ fmtTime(e.mtime) }}</span>
-              </label>
+              </div>
               <div v-if="!remote.loading && !remote.entries.length && !remote.error" class="panel-loading">空目录</div>
               <div v-if="dragOver === 'remote'" class="drop-hint">松开鼠标上传到当前目录</div>
             </div>
@@ -165,8 +176,7 @@ async function open() {
   visible.value = true
   transfers.length = 0
 
-  const home = await window.api.localHome()
-  await listLocal(home)
+  await listLocal('__drives__') // 本机默认显示磁盘布局
   const res = await window.api.sftpHome(connId.value)
   await listRemote(res.ok ? res.path : '/')
 }
@@ -176,9 +186,20 @@ function close() {
 defineExpose({ open })
 
 // ---------- 目录浏览 ----------
+// dir === '__drives__' 时显示"此电脑"盘符视图
 async function listLocal(dir) {
   local.loading = true
   local.error = ''
+  if (dir === '__drives__') {
+    const res = await window.api.localDrives()
+    local.loading = false
+    if (!res.ok) { local.error = res.error; return }
+    local.dir = '__drives__'
+    local.dirInput = '此电脑'
+    local.entries = res.entries
+    local.selected = []
+    return
+  }
   const res = await window.api.localList(dir)
   local.loading = false
   if (!res.ok) {
@@ -208,15 +229,36 @@ const refreshLocal = () => listLocal(local.dir)
 const refreshRemote = () => listRemote(remote.dir)
 
 function goUp(panel) {
-  const sep = panel === local ? '\\' : '/'
+  if (panel === local && panel.dir === '__drives__') return
   const cur = panel.dir.replace(/[\\/]+$/, '')
   const idx = Math.max(cur.lastIndexOf('/'), cur.lastIndexOf('\\'))
   const up = idx > 0 ? cur.slice(0, idx) : idx === 0 ? cur.slice(0, 1) : '/'
   panel === local ? listLocal(up) : listRemote(up)
 }
-function enter(panel, e) {
+
+// 单击行：目录进入，文件不动作（选取只认复选框）
+function openEntry(panel, side, e) {
   if (!e.isDir) return
-  panel === local ? listLocal(e.path) : listRemote(e.path)
+  side === 'local' ? listLocal(e.path) : listRemote(e.path)
+}
+
+// 选取只通过复选框
+function togglePick(panel, name) {
+  const i = panel.selected.indexOf(name)
+  if (i >= 0) panel.selected.splice(i, 1)
+  else panel.selected.push(name)
+}
+
+// 盘符视图的图标与容量列
+function driveIcon(panel, e) {
+  if (panel === local && panel.dir === '__drives__') return '💾'
+  return e.isDir ? '📁' : '📄'
+}
+function driveSize(panel, e) {
+  if (panel === local && panel.dir === '__drives__' && e.size != null) {
+    return fmtSize(e.free) + ' 可用'
+  }
+  return ''
 }
 
 // ---------- 文件操作 ----------
@@ -281,6 +323,17 @@ function bindProgress(task) {
 }
 
 async function runTransfer(direction, items) {
+  // 二次确认：明确列出传什么、传到哪
+  const names = items.map((i) => i.name)
+  const listText = names.length <= 5 ? names.join('、') : names.slice(0, 5).join('、') + ` 等 ${names.length} 项`
+  const ok = await dialog.askConfirm({
+    title: direction === 'upload' ? '确认上传' : '确认下载',
+    message: direction === 'upload'
+      ? `将 ${listText} 上传到服务器目录：\n${remote.dir}`
+      : `将 ${listText} 下载到本机目录：\n${local.dir}`
+  })
+  if (!ok) return
+
   busy.value = true
   try {
     for (const it of items) {
@@ -411,6 +464,8 @@ function fmtTime(ms) {
   font-size: 12.3px;
 }
 .frow:hover { background: var(--bg2); }
+.frow.picked { background: var(--blue-dim); }
+.frow input[type='checkbox'] { cursor: pointer; }
 .frow input[type='checkbox'] { flex-shrink: 0; }
 .ficon { flex-shrink: 0; }
 .fname { flex: 1; min-width: 0; cursor: pointer; }

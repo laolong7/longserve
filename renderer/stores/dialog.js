@@ -14,7 +14,10 @@ export const useDialogStore = defineStore('dialog', {
     promptVisible: false,
     promptTitle: '',
     promptValue: '',
-    _promptResolve: null
+    _promptResolve: null,
+    // 轻提示
+    toast: '',
+    _toastTimer: null
   }),
   actions: {
     // 确认框：Promise<boolean>
@@ -47,6 +50,13 @@ export const useDialogStore = defineStore('dialog', {
     answerInput(val) {
       this.promptVisible = false
       if (this._promptResolve) { this._promptResolve(val); this._promptResolve = null }
+    },
+
+    // 轻提示（自动消失）
+    showToast(msg) {
+      this.toast = msg
+      clearTimeout(this._toastTimer)
+      this._toastTimer = setTimeout(() => { this.toast = '' }, 2200)
     }
   }
 })

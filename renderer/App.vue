@@ -111,7 +111,7 @@ function startDrag(side) {
   display: flex;
   flex-direction: column;
 }
-.right-col { background: #1b1922; } /* AI 区暗紫基调 */
+.right-col { background: var(--bg1); } /* AI 区紫调由内部元素体现，背景跟随全局主题 */
 .center-col {
   flex: 1;
   min-width: 0;

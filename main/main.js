@@ -178,6 +178,33 @@ function registerIpc() {
     }
   })
   ipcMain.handle('local:home', () => app.getPath('home'))
+  // 盘符列表（"此电脑"视图）：枚举可用磁盘 + 容量
+  ipcMain.handle('local:drives', () => {
+    const drives = []
+    for (let i = 65; i <= 90; i++) {
+      const letter = String.fromCharCode(i)
+      const root = letter + ':\\'
+      try {
+        fs.accessSync(root, fs.constants.R_OK)
+        let total = null
+        let free = null
+        try {
+          const st = fs.statfsSync(root)
+          total = st.blocks * st.bsize
+          free = st.bavail * st.bsize
+        } catch { /* 容量不可得（如虚拟光驱）仍列出 */ }
+        drives.push({
+          name: '本地磁盘 (' + letter + ':)',
+          isDir: true,
+          size: total,
+          free,
+          mtime: null,
+          path: root
+        })
+      } catch { /* 无此盘符 */ }
+    }
+    return { ok: true, entries: drives }
+  })
   ipcMain.handle('local:mkdir', async (_e, dirPath) => {
     try { fs.mkdirSync(dirPath, { recursive: true }); return { ok: true } }
     catch (err) { return { ok: false, error: err.message } }
