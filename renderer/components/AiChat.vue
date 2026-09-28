@@ -37,20 +37,25 @@
           <div class="bubble user-bubble">{{ m.content }}</div>
         </div>
 
-        <!-- 命令模式消息：自然语言直译的命令卡片 -->
+        <!-- 命令模式消息：自然语言直译的纯指令卡片（若干条，逐条/一键执行） -->
         <div v-else-if="m.kind === 'cmd'" class="msg assistant">
           <div class="assistant-tag">{{ m.model || 'AI' }}</div>
           <div class="bubble ai-bubble selectable">
             <div class="cmd-q faint">「{{ m.prompt }}」</div>
-            <template v-if="m.cmd">
-              <div class="cmd-out mono selectable">{{ m.cmd }}</div>
+            <template v-if="m.cmds && m.cmds.length">
+              <div v-for="(c, i) in m.cmds" :key="i" class="cmd-row">
+                <span class="cmd-idx mono">{{ i + 1 }}</span>
+                <div class="cmd-out mono selectable">{{ c.text }}</div>
+                <button v-if="!c.done" class="ghost btn-xs" title="执行这条指令" @click="ai.executeCmd(m, i)">▶</button>
+                <span v-else class="faint cmd-ok" title="已输入终端执行">✓</span>
+              </div>
               <div class="cmd-foot">
-                <button v-if="!m.executed" class="primary" @click="ai.executeCmd(m)">▶ 在终端执行</button>
-                <span v-else class="faint" style="font-size:11px">✓ 已输入终端执行</span>
-                <span class="faint" style="font-size:11px">危险命令会先弹窗确认</span>
+                <button v-if="m.cmds.some((c) => !c.done)" class="primary" @click="ai.executeAllCmds(m)">▶ 全部顺序执行</button>
+                <span v-else class="faint" style="font-size:11px">✓ 已全部输入终端执行</span>
+                <span class="faint" style="font-size:11px">危险指令会先弹窗确认</span>
               </div>
             </template>
-            <div v-else-if="m.status === 'done'" class="faint" style="font-size:12px">{{ m.content || '（没有给出命令）' }}</div>
+            <div v-else-if="m.status === 'done'" class="faint" style="font-size:12px">{{ m.content || '（没有给出指令）' }}</div>
             <span v-if="m.status === 'streaming'" class="caret"></span>
           </div>
         </div>
@@ -115,21 +120,27 @@
       <div class="mode-row">
         <button
           class="mode-pill"
+          :class="{ on: !ai.cmdMode }"
+          title="副驾模式：正常对话，AI 自己动手操作（执行命令、读写文件）"
+          @click="ai.cmdMode = false"
+        >◆ 副驾模式</button>
+        <button
+          class="mode-pill"
           :class="{ on: ai.cmdMode }"
-          title="命令模式：输入自然语言，AI 直译成一条命令（不走工具、可一键执行）"
-          @click="ai.cmdMode = !ai.cmdMode"
+          title="命令模式：输入自然语言，AI 直译成若干条纯指令（不走工具、逐条或一键执行）"
+          @click="ai.cmdMode = true"
         >⚡ 命令模式</button>
-        <span class="faint" style="font-size:10.5px">{{ ai.cmdMode ? '描述你想做的事，AI 只给一条命令' : '' }}</span>
+        <span class="faint" style="font-size:10.5px">{{ ai.cmdMode ? '需求直译为若干条纯指令' : '' }}</span>
       </div>
       <textarea
         ref="inputEl"
         v-model="draft"
         rows="2"
-        :placeholder="ai.cmdMode ? '如：查看 nginx 最近 100 行错误日志' : '问问题，或指挥我操作服务器（Enter 发送 / Shift+Enter 换行）'"
+        :placeholder="ai.cmdMode ? '如：清理 nginx 日志并重载（会拆成多条纯指令）' : '问问题，或指挥我操作服务器（Enter 发送 / Shift+Enter 换行）'"
         @keydown.enter.exact.prevent="send(draft)"
       ></textarea>
       <button v-if="ai.running" class="stop-btn" @click="ai.abort()" title="停止">■ 停止</button>
-      <button v-else class="primary send-btn" :disabled="!draft.trim()" @click="send(draft)">{{ ai.cmdMode ? '转命令' : '发送' }}</button>
+      <button v-else class="primary send-btn" :disabled="!draft.trim()" @click="send(draft)">{{ ai.cmdMode ? '转指令' : '发送' }}</button>
     </div>
   </div>
 </template>
@@ -375,19 +386,25 @@ function mdRender(text) {
   margin-left: 2px;
 }
 @keyframes blink { 50% { opacity: 0; } }
-/* 命令模式消息卡片 */
+/* 命令模式消息卡片（若干条纯指令） */
 .cmd-q { font-size: 11.5px; margin-bottom: 6px; }
+.cmd-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.cmd-idx { width: 14px; text-align: right; flex-shrink: 0; font-size: 10.5px; color: var(--text-faint); }
 .cmd-out {
+  flex: 1;
+  min-width: 0;
   background: var(--bg0);
   border: 1px solid var(--border);
   border-left: 3px solid var(--violet);
   border-radius: 4px;
-  padding: 7px 10px;
+  padding: 5px 9px;
   font-size: 12px;
   color: var(--green);
   white-space: pre-wrap;
   word-break: break-all;
 }
+.cmd-row .btn-xs { flex-shrink: 0; }
+.cmd-ok { color: var(--green); width: 20px; text-align: center; flex-shrink: 0; font-size: 11px; }
 .cmd-foot { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
 .cmd-foot .primary { font-size: 11.5px; padding: 3px 10px; }
 /* 命令模式开关 */

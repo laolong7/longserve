@@ -5,6 +5,7 @@
       <span class="tb-title">Laolong Server Utilities</span>
     </div>
     <div class="tb-actions">
+      <button class="tb-btn tb-about" title="使用指南" @click="openGuide()">📖</button>
       <button class="tb-btn tb-about" title="关于系统" @click="openAbout()">ⓘ</button>
       <button class="tb-btn" title="最小化" @click="api.winMinimize()">─</button>
       <button class="tb-btn" :title="maximized ? '还原' : '最大化'" @click="toggleMax">
@@ -20,6 +21,7 @@ import { ref, inject, onMounted, onBeforeUnmount } from 'vue'
 
 const api = window.api
 const openAbout = inject('openAbout', () => {})
+const openGuide = inject('openGuide', () => {})
 const maximized = ref(false)
 let unsub = null
 

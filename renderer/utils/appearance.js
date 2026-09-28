@@ -3,8 +3,8 @@
 // a: { accent, text, bgHue, bgAlpha, termFontSize } 或 null（默认）
 // 设计要点：
 //   - 默认主题为「深海蓝 + 真透明」（牢笼 2026-09-28 定）：
-//     accent #5ccfe6 / 文字 #cfe3ef / 色相 210° / 透明度 59% / 终端字号 11px
-//     终端背景 #1d2530（RGB 29 37 48），窗口效果真透明
+//     accent #5ccfe6 / 文字 #cfe3ef / 色相 210° / 透明度 60% / 终端字号 11px
+//     终端背景 #16181d / 终端文字 #00ffee（均独立配色，不跟随全局），窗口效果真透明
 //   - bgHue 允许 0（Number(x)||222 会把 0 当假值，属历史 bug）
 //   - 透明度要有参照物才看得见：html 底为随色相的辉光渐变，
 //     面板/终端半透明后透出光晕，低透明度才有"通透"感
@@ -12,14 +12,20 @@
 // ============================================================
 
 // 默认外观（新装无配置时生效；"恢复默认"也回到这里）
+// 牢笼 2026-09-28 定稿（对应配置字段）：
+//   themePreset=deepBlue / accentColor=#5ccfe6 / uiTextColor=#cfe3ef / bgHue=210
+//   uiOpacity=0.60 / terminalFontSize=11 / terminalBgColor=#16181d（不跟随全局）
+//   terminalFgColor=#00ffee（不跟随全局）/ windowEffect=transparent
+// termBg/termFg 语义：undefined=用默认色，''=跟随全局，其它=独立颜色
 export const DEFAULT_APPEARANCE = {
+  themePreset: 'deepBlue',
   accent: '#5ccfe6',
   text: '#cfe3ef',
   bgHue: 210,
-  bgAlpha: 59,
+  bgAlpha: 60,
   termFontSize: 11,
-  termBg: '#1d2530', // RGB 29 37 48
-  termFg: '',
+  termBg: '#16181d',
+  termFg: '#00ffee',
   windowEffect: 'transparent'
 }
 
@@ -49,11 +55,11 @@ const TERM_BASE = {
 }
 
 export const APPEARANCE_PRESETS = [
-  { name: '深海蓝（默认）', accent: '#5ccfe6', text: '#cfe3ef', bgHue: 210 },
-  { name: '磷光绿', accent: '#3fdc97', text: '#d8dce4', bgHue: 222 },
-  { name: '暖橙', accent: '#f2a15a', text: '#ecdfd2', bgHue: 20 },
-  { name: '紫夜', accent: '#a78bfa', text: '#ddd6f3', bgHue: 265 },
-  { name: '灰岩', accent: '#9db2c7', text: '#d5dae0', bgHue: 215 }
+  { id: 'deepBlue', name: '深海蓝（默认）', accent: '#5ccfe6', text: '#cfe3ef', bgHue: 210 },
+  { id: 'phosphor', name: '磷光绿', accent: '#3fdc97', text: '#d8dce4', bgHue: 222 },
+  { id: 'warmOrange', name: '暖橙', accent: '#f2a15a', text: '#ecdfd2', bgHue: 20 },
+  { id: 'purpleNight', name: '紫夜', accent: '#a78bfa', text: '#ddd6f3', bgHue: 265 },
+  { id: 'grayRock', name: '灰岩', accent: '#9db2c7', text: '#d5dae0', bgHue: 215 }
 ]
 
 function hexToRgba(hex, alpha) {

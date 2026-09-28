@@ -12,6 +12,7 @@ import { useConfigStore } from './config'
 import { useTerminalStore } from './terminals'
 import { useDialogStore } from './dialog'
 import { checkDanger } from '../utils/danger'
+import { splitCmds } from '../utils/cmds.mjs'
 
 // ---------- 工具定义（OpenAI tools 格式） ----------
 const TOOLS = [
@@ -201,11 +202,13 @@ const SYSTEM_PROMPT = `你是牢笼的服务器管理 AI 副驾，运行在一�
 7. 不确定的事情就先用工具查证，不要凭空猜测`
 
 // 自然语言→命令模式（不走工具、不进历史上下文）
-const CMD_SYSTEM = `你是 Linux 命令转换器。把用户的自然语言需求翻译成一条 Linux 命令。
+// 输出若干条纯指令（按执行顺序），不是一条命令，也不是带解释的方案
+const CMD_SYSTEM = `你是 Linux 指令转换器。把用户的自然语言需求转化成若干条纯 Linux 指令（按执行顺序排列）。
 规则：
-1. 只输出一条命令，放在一个代码块里，不写任何解释
-2. 命令面向典型 Linux 服务器（systemd 发行版），可用 sudo
-3. 尽量安全：优先查看类命令；涉及修改/删除时保持最小影响面`
+1. 只输出指令本身：每条指令一行，放在一个代码块里，不写任何解释、序号或多余文字
+2. 需求简单就给 1 条；复杂需求拆成多条（如先查看再操作、先备份再修改）
+3. 指令面向典型 Linux 服务器（systemd 发行版），可用 sudo
+4. 尽量安全：优先查看类指令；涉及修改/删除时保持最小影响面`
 
 let msgSeq = 0
 const newMsgId = () => `msg_${Date.now()}_${++msgSeq}`
@@ -216,7 +219,7 @@ export const useAiStore = defineStore('ai', {
     messages: [],
     running: false,
     lastError: '',
-    cmdMode: false, // 命令模式：输入自然语言直译成命令（不调用工具）
+    cmdMode: false, // 命令模式：输入自然语言直译成若干条纯指令（不调用工具）；默认为副驾模式
     snapshots: [], // 本会话文件快照 { path, backup, time, server, local? }
     _desktopPath: '', // 桌面路径缓存（本机文件工具/系统上下文用）
     // 当前会话元信息（历史记录用）
@@ -330,14 +333,14 @@ export const useAiStore = defineStore('ai', {
       if (!this._desktopPath) {
         try { this._desktopPath = await window.api.localDesktop() } catch { /* 忽略 */ }
       }
-      // 命令模式：直译成命令，不走工具循环
+      // 命令模式：直译成若干条纯指令，不走工具循环
       if (this.cmdMode) return this.translate(text)
       this.lastError = ''
       this.messages.push({ id: newMsgId(), role: 'user', content: text.trim() })
       await this.runLoop()
     },
 
-    // ---------- 自然语言 → 命令 ----------
+    // ---------- 自然语言 → 若干条纯指令 ----------
     async translate(text) {
       const config = useConfigStore()
       const dialog = useDialogStore()
@@ -348,8 +351,7 @@ export const useAiStore = defineStore('ai', {
         kind: 'cmd',
         prompt: text.trim(),
         content: '',
-        cmd: '',
-        executed: false,
+        cmds: [], // [{ text, done }] 若干条纯指令，逐条或一键顺序执行
         reasoning: '',
         model: config.activeProvider.model || '',
         toolCalls: [],
@@ -371,11 +373,9 @@ export const useAiStore = defineStore('ai', {
           this.lastError = res.error
           if (!msg.content) msg.content = '（请求失败）'
         } else {
-          // 提取命令：优先代码块，否则整段第一行
-          const m = msg.content.match(/```[a-zA-Z]*\n?([\s\S]*?)```/)
-          const raw = (m ? m[1] : msg.content).trim()
-          msg.cmd = raw.replace(/^[$#]\s*/gm, '').split('\n').filter(Boolean)[0] || ''
-          if (!msg.cmd) this.lastError = 'AI 没有给出有效命令，换个说法试试'
+          // 提取指令：每行一条纯指令（见 utils/cmds.mjs）
+          msg.cmds = splitCmds(msg.content).map((t) => ({ text: t, done: false }))
+          if (!msg.cmds.length) this.lastError = 'AI 没有给出有效指令，换个说法试试'
         }
       } finally {
         this.running = false
@@ -383,23 +383,34 @@ export const useAiStore = defineStore('ai', {
       }
     },
 
-    // 执行 cmd 消息里的命令（复用危险拦截 + 打字机）
-    async executeCmd(msg) {
+    // 执行 cmd 消息里第 i 条指令（复用危险拦截 + 打字机）
+    async executeCmd(msg, i) {
       const dialog = useDialogStore()
       const terminals = useTerminalStore()
-      if (!msg.cmd || !terminals.activeTab || terminals.activeTab.status !== 'connected') {
+      const c = (msg.cmds || [])[i]
+      if (!c || c.done) return
+      if (!terminals.activeTab || terminals.activeTab.status !== 'connected') {
         this.lastError = '当前没有已连接的终端，无法执行'
         return
       }
-      const { danger, reasons } = checkDanger(msg.cmd)
+      const { danger, reasons } = checkDanger(c.text)
       if (danger) {
-        const ok = await dialog.askConfirm({ title: '执行 AI 生成的命令', command: msg.cmd, reasons })
+        const ok = await dialog.askConfirm({ title: `执行 AI 生成的指令（${i + 1}/${msg.cmds.length}）`, command: c.text, reasons })
         if (!ok) return
         if (this.sessionMeta) this.sessionMeta.hasDanger = true
       }
-      const typed = await this.typeIntoTerminal(msg.cmd)
-      if (typed) msg.executed = true
+      const typed = await this.typeIntoTerminal(c.text)
+      if (typed) c.done = true
       else dialog.showToast('已中止输入')
+    },
+
+    // 一键顺序执行全部未执行的指令（每条仍走危险拦截；被拒/中止则停下）
+    async executeAllCmds(msg) {
+      for (let i = 0; i < (msg.cmds || []).length; i++) {
+        if (msg.cmds[i].done) continue
+        await this.executeCmd(msg, i)
+        if (!msg.cmds[i].done) break // 用户拒绝或中止：不再继续后面的指令
+      }
     },
 
     // ---------- 选中终端输出问 AI（带上下文） ----------

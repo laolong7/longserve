@@ -239,14 +239,14 @@
               <div class="form-row">
                 <label>终端背景色（默认跟随全局）</label>
                 <div style="display:flex; gap:6px; align-items:center">
-                  <input type="color" :value="draftTermBg || '#14161b'" @input="draftTermBg = $event.target.value; updateAppearance()" style="width:46px; padding:2px" />
+                  <input type="color" :value="draftTermBg || DEFAULT_APPEARANCE.termBg" @input="draftTermBg = $event.target.value; updateAppearance()" style="width:46px; padding:2px" />
                   <button class="ghost" @click="draftTermBg = ''; updateAppearance()">跟随全局</button>
                 </div>
               </div>
               <div class="form-row">
                 <label>终端文字色（默认跟随全局）</label>
                 <div style="display:flex; gap:6px; align-items:center">
-                  <input type="color" :value="draftTermFg || '#d8dce4'" @input="draftTermFg = $event.target.value; updateAppearance()" style="width:46px; padding:2px" />
+                  <input type="color" :value="draftTermFg || DEFAULT_APPEARANCE.termFg" @input="draftTermFg = $event.target.value; updateAppearance()" style="width:46px; padding:2px" />
                   <button class="ghost" @click="draftTermFg = ''; updateAppearance()">跟随全局</button>
                 </div>
               </div>
@@ -284,7 +284,13 @@
                 更换位置会把全部数据（含加密密钥）拷贝到新目录并重启应用；换电脑时拷贝数据文件夹即可迁移。
               </div>
             </div>
-            <div class="form-row">
+            <!-- 数据文件夹操作紧跟数据相关区块（不再垫在最底下） -->
+            <div class="form-actions">
+              <button @click="openDataDir">打开数据文件夹</button>
+              <button @click="changeDataDir">更改保存位置…</button>
+              <button class="ghost" @click="resetDataDir">恢复默认位置</button>
+            </div>
+            <div class="form-row" style="margin-top:16px">
               <label>会话录制保存位置（asciinema .cast 格式，可在终端标签栏点「⏺ 录制」启停）</label>
               <div class="mono" style="word-break:break-all; background:var(--bg2); padding:8px 10px; border-radius:6px; font-size:12px">{{ recordDirShown }}</div>
               <div style="display:flex; gap:8px">
@@ -292,11 +298,6 @@
                 <button @click="changeRecordDir">更改位置…</button>
                 <button class="ghost" @click="resetRecordDir">恢复默认</button>
               </div>
-            </div>
-            <div class="form-actions">
-              <button @click="openDataDir">打开数据文件夹</button>
-              <button @click="changeDataDir">更改保存位置…</button>
-              <button class="ghost" @click="resetDataDir">恢复默认位置</button>
             </div>
           </div>
         </div>
@@ -391,7 +392,7 @@
 import { ref, reactive, watch, computed, inject } from 'vue'
 import { useConfigStore } from '../stores/config'
 import { useDialogStore } from '../stores/dialog'
-import { APPEARANCE_PRESETS } from '../utils/appearance'
+import { APPEARANCE_PRESETS, DEFAULT_APPEARANCE } from '../utils/appearance'
 
 const config = useConfigStore()
 const dialog = useDialogStore()
@@ -436,15 +437,16 @@ async function testConn() {
   }
 }
 
-// 外观草稿（即时生效；兜底值=默认深海蓝主题）
-const draftAccent = ref('#5ccfe6')
-const draftText = ref('#cfe3ef')
-const draftHue = ref(210)
-const draftAlpha = ref(59)
-const draftFs = ref(11)
-const draftTermBg = ref('#1d2530')
-const draftTermFg = ref('')
-const draftEffect = ref('transparent')
+// 外观草稿（即时生效；兜底值=默认深海蓝主题，与 DEFAULT_APPEARANCE 一致）
+const draftThemePreset = ref(DEFAULT_APPEARANCE.themePreset)
+const draftAccent = ref(DEFAULT_APPEARANCE.accent)
+const draftText = ref(DEFAULT_APPEARANCE.text)
+const draftHue = ref(DEFAULT_APPEARANCE.bgHue)
+const draftAlpha = ref(DEFAULT_APPEARANCE.bgAlpha)
+const draftFs = ref(DEFAULT_APPEARANCE.termFontSize)
+const draftTermBg = ref(DEFAULT_APPEARANCE.termBg)
+const draftTermFg = ref(DEFAULT_APPEARANCE.termFg)
+const draftEffect = ref(DEFAULT_APPEARANCE.windowEffect)
 
 const EFFECTS = [
   { value: 'none', label: '不透明' },
@@ -454,20 +456,23 @@ const EFFECTS = [
 
 function syncDrafts() {
   const a = config.appearance
-  draftAccent.value = a?.accent || '#5ccfe6'
-  draftText.value = a?.text || '#cfe3ef'
-  draftHue.value = a?.bgHue ?? 210
-  draftAlpha.value = a?.bgAlpha ?? 59
-  draftFs.value = a?.termFontSize ?? 11
-  draftTermBg.value = a?.termBg ?? '#1d2530' // 默认深海蓝终端底；显式''=跟随全局
-  draftTermFg.value = a?.termFg || ''
-  draftEffect.value = a?.windowEffect || 'transparent'
+  draftAccent.value = a?.accent || DEFAULT_APPEARANCE.accent
+  draftText.value = a?.text || DEFAULT_APPEARANCE.text
+  draftHue.value = a?.bgHue ?? DEFAULT_APPEARANCE.bgHue
+  draftAlpha.value = a?.bgAlpha ?? DEFAULT_APPEARANCE.bgAlpha
+  draftFs.value = a?.termFontSize ?? DEFAULT_APPEARANCE.termFontSize
+  // termBg/termFg：undefined=默认独立色，显式 ''=跟随全局（?? 不把 '' 当缺省）
+  draftTermBg.value = a?.termBg ?? DEFAULT_APPEARANCE.termBg
+  draftTermFg.value = a?.termFg ?? DEFAULT_APPEARANCE.termFg
+  draftEffect.value = a?.windowEffect || DEFAULT_APPEARANCE.windowEffect
+  draftThemePreset.value = a?.themePreset || ''
 }
 watch(tab, (t) => { if (t === 'appearance') syncDrafts() })
 
 async function updateAppearance(effectChanged = false) {
   const effect = draftEffect.value
   const a = {
+    themePreset: draftThemePreset.value || 'custom',
     accent: draftAccent.value,
     text: draftText.value,
     bgHue: draftHue.value,
@@ -501,6 +506,7 @@ async function updateAppearance(effectChanged = false) {
   }
 }
 function applyPreset(p) {
+  draftThemePreset.value = p.id
   draftAccent.value = p.accent
   draftText.value = p.text
   draftHue.value = p.bgHue
@@ -508,13 +514,23 @@ function applyPreset(p) {
 }
 function isPresetActive(p) {
   const a = config.appearance
-  return a && a.accent === p.accent && a.bgHue === p.bgHue
+  if (!a) return p.id === DEFAULT_APPEARANCE.themePreset
+  // 优先按 themePreset 判定；老配置没有该字段时回退配色比对
+  if (a.themePreset) return a.themePreset === p.id
+  return a.accent === p.accent && a.bgHue === p.bgHue
 }
 function resetAppearance() {
-  config.appearance = null
-  config.save()
-  syncDrafts()
-  config.runtimeEffect = 'none' // 恢复默认即不透明，可直接生效无需重启
+  // 全部草稿回默认值，再走统一的生效/重启询问逻辑（默认是真透明，非不透明）
+  draftThemePreset.value = DEFAULT_APPEARANCE.themePreset
+  draftAccent.value = DEFAULT_APPEARANCE.accent
+  draftText.value = DEFAULT_APPEARANCE.text
+  draftHue.value = DEFAULT_APPEARANCE.bgHue
+  draftAlpha.value = DEFAULT_APPEARANCE.bgAlpha
+  draftFs.value = DEFAULT_APPEARANCE.termFontSize
+  draftTermBg.value = DEFAULT_APPEARANCE.termBg
+  draftTermFg.value = DEFAULT_APPEARANCE.termFg
+  draftEffect.value = DEFAULT_APPEARANCE.windowEffect
+  updateAppearance(true)
   dialog.showToast('已恢复默认外观')
 }
 

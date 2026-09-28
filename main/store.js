@@ -100,7 +100,8 @@ function defaults() {
     skills: [],             // { id, name, description, content, enabled }
     pipelines: [],          // { id, name, steps: [{ skillId, checkpoint }] } 技能流水线
     recordDir: '',          // 会话录制保存目录（空=默认 userData/recordings）
-    appearance: null,       // { accent, text, bgHue, bgAlpha } null=默认主题
+    appearance: null,       // 见 utils/appearance.js DEFAULT_APPEARANCE；null=默认主题
+    defaultsVersion: 0,     // 预设技能/流水线版本标记（见 DEFAULTS_VERSION）
     seq: 0                  // id 生成计数器
   }
 }
@@ -195,8 +196,26 @@ const DEFAULT_PIPELINES = [
       { skillId: 'sk_preset_deploy', checkpoint: true },
       { skillId: 'sk_preset_logs', checkpoint: true }
     ]
+  },
+  {
+    id: 'pl_preset_nginx', name: 'nginx 变更发布',
+    steps: [
+      { skillId: 'sk_preset_nginx', checkpoint: true },
+      { skillId: 'sk_preset_logs', checkpoint: true }
+    ]
+  },
+  {
+    id: 'pl_preset_trouble', name: '服务故障排查',
+    steps: [
+      { skillId: 'sk_preset_logs', checkpoint: true },
+      { skillId: 'sk_preset_health', checkpoint: true }
+    ]
   }
 ]
+
+// 预设版本号：升级新增预设时 +1，load() 会把缺的默认项一次性补进已有配置；
+// 补齐后写入版本标记，之后用户删除预设不会再复活
+const DEFAULTS_VERSION = 2
 
 // 读取（内存缓存；返回的对象允许渲染层直接修改后回传保存）
 function load() {
@@ -207,12 +226,24 @@ function load() {
   } catch { /* 首次启动无配置文件 */ }
 
   const cfg = normalize(raw)
-  // 首次启动注入预设技能/流水线（之后归用户管理，删了不复活）
-  if (firstRun && !cfg.skills.length) cfg.skills = JSON.parse(JSON.stringify(DEFAULT_SKILLS))
-  if (firstRun && !cfg.pipelines.length) cfg.pipelines = JSON.parse(JSON.stringify(DEFAULT_PIPELINES))
+  // 预设注入/回填：首次启动全量注入；老配置升级到新预设版本时补齐缺失项
+  // （只按 id 补缺，不覆盖用户改过的；补完写入版本标记，之后删除不复活）
+  if (firstRun || Number(raw && raw.defaultsVersion) !== DEFAULTS_VERSION) {
+    for (const s of DEFAULT_SKILLS) {
+      if (!cfg.skills.some((x) => x.id === s.id)) cfg.skills.push(JSON.parse(JSON.stringify(s)))
+    }
+    for (const p of DEFAULT_PIPELINES) {
+      if (!cfg.pipelines.some((x) => x.id === p.id)) cfg.pipelines.push(JSON.parse(JSON.stringify(p)))
+    }
+    cfg.defaultsVersion = DEFAULTS_VERSION
+  }
   for (const inst of cfg.instances) inst.password = decryptField(inst.password)
   for (const p of cfg.aiProviders) p.apiKey = decryptField(p.apiKey)
   cache = cfg
+  // 版本标记立即落盘：防止用户删掉预设后下次启动又被回填复活
+  if (cfg.defaultsVersion === DEFAULTS_VERSION && Number(raw && raw.defaultsVersion) !== DEFAULTS_VERSION) {
+    try { save(cfg) } catch { /* 落盘失败不影响启动，下次再补 */ }
+  }
   return cfg
 }
 
