@@ -5,7 +5,7 @@
         <div class="about-head">
           <span class="about-logo">◆</span>
           <div class="about-title-wrap">
-            <div class="about-title">Laolong Server Utilities</div>
+            <div class="about-title">Longserve</div>
             <div class="about-sub">带 AI 副驾的服务器终端管理工具</div>
           </div>
           <span class="about-ver mono">v{{ info.version || '…' }}</span>

@@ -67,6 +67,14 @@ async function main() {
   }
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+  console.log('产品名 Longserve')
+  {
+    const t = await ev('document.title')
+    ok(t === 'Longserve', '页面标题 = Longserve', t)
+    const tb = await ev(`document.querySelector('.tb-title')?.textContent.trim()`)
+    ok(tb === 'Longserve', '标题栏显示 Longserve', tb)
+  }
+
   console.log('标题栏：使用指南按钮在关于系统左边')
   {
     const v = await ev(`(() => {

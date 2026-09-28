@@ -1,7 +1,7 @@
 {
   "name": "laoji-server-tool",
-  "productName": "Laolong Server Utilities",
-  "version": "1.8.0",
+  "productName": "Longserve",
+  "version": "1.9.0",
   "description": "带 AI 副驾的服务器终端管理工具",
   "main": "main/main.js",
   "author": "牢笼 & 逐光",
@@ -31,7 +31,7 @@
   },
   "build": {
     "appId": "com.laoji.servertool",
-    "productName": "Laolong Server Utilities",
+    "productName": "Longserve",
     "directories": {
       "output": "release"
     },

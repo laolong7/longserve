@@ -57,36 +57,52 @@ function changeDataDir(app, newDir) {
 function resetDataDir(app) {
   const bp = bootstrapPath(app)
   const custom = fs.existsSync(bp) ? fs.readFileSync(bp, 'utf8').trim() : ''
-  const def = path.join(app.getPath('appData'), 'Laolong Server Utilities')
+  // 默认 userData = %APPDATA%\<app.name>（productName），跟随产品名自动变化
+  const def = path.join(app.getPath('appData'), app.name || 'Longserve')
   if (custom && fs.existsSync(custom)) copyDataFiles(custom, def)
   if (fs.existsSync(bp)) fs.unlinkSync(bp)
   return { ok: true }
 }
 
-// 产品名改为 Laolong Server Utilities 后 userData 目录随之变化，
-// 首次启动时把旧目录（牢笼服务器工具）里的数据搬过来，无缝升级
+// 产品名变更史（userData 目录名随 productName 变化），首次启动把旧目录数据搬过来：
+//   牢笼服务器工具 → Laolong Server Utilities → Longserve
+// 顺序新的在前：以最近活跃的数据为准（旧目录可能残留过期配置）
 // ⚠️ Local State 必须一起搬：safeStorage 的 AES 解密密钥存于其中，
 // 漏搬会导致所有密码/apiKey 解密失败（SSH 连不上、AI 401）
+const LEGACY_USERDATA_NAMES = ['Laolong Server Utilities', '牢笼服务器工具']
+
 function migrateFromLegacyName(app) {
   try {
-    const legacyDir = path.join(app.getPath('appData'), '牢笼服务器工具')
     const newDir = path.dirname(configFile)
-    // Local State 即使 config 已存在也要补搬（修复过一次的历史残留场景）
-    const legacyState = path.join(legacyDir, 'Local State')
     const newState = path.join(newDir, 'Local State')
-    if (fs.existsSync(legacyState) && !fs.existsSync(newState)) {
-      fs.mkdirSync(newDir, { recursive: true })
-      fs.copyFileSync(legacyState, newState)
-      console.log('[store] 已补搬 safeStorage 密钥文件（Local State）')
+    const legacyDirs = LEGACY_USERDATA_NAMES.map((n) => path.join(app.getPath('appData'), n))
+
+    // Local State 即使 config 已存在也要补搬（修复过一次的历史残留场景）
+    if (!fs.existsSync(newState)) {
+      for (const dir of legacyDirs) {
+        const s = path.join(dir, 'Local State')
+        if (fs.existsSync(s)) {
+          fs.mkdirSync(newDir, { recursive: true })
+          fs.copyFileSync(s, newState)
+          console.log('[store] 已补搬 safeStorage 密钥文件（Local State）')
+          break
+        }
+      }
     }
     if (fs.existsSync(configFile)) return // 配置已有，无需再搬
-    const legacyConfig = path.join(legacyDir, 'config.json')
-    if (!fs.existsSync(legacyConfig)) return
-    fs.mkdirSync(newDir, { recursive: true })
-    fs.copyFileSync(legacyConfig, configFile)
-    const legacyHistory = path.join(legacyDir, 'history.json')
-    if (fs.existsSync(legacyHistory)) fs.copyFileSync(legacyHistory, historyFile)
-    console.log('[store] 已从旧配置目录迁移数据')
+    // config/history：从最近的旧目录取（含同目录的 Local State 优先于其它目录）
+    for (const dir of legacyDirs) {
+      const legacyConfig = path.join(dir, 'config.json')
+      if (!fs.existsSync(legacyConfig)) continue
+      fs.mkdirSync(newDir, { recursive: true })
+      fs.copyFileSync(legacyConfig, configFile)
+      const legacyHistory = path.join(dir, 'history.json')
+      if (fs.existsSync(legacyHistory)) fs.copyFileSync(legacyHistory, historyFile)
+      const legacyState = path.join(dir, 'Local State')
+      if (fs.existsSync(legacyState) && !fs.existsSync(newState)) fs.copyFileSync(legacyState, newState)
+      console.log(`[store] 已从旧配置目录迁移数据：${path.basename(dir)}`)
+      return
+    }
   } catch (err) {
     console.log('[store] 配置迁移失败（不影响启动）:', err.message)
   }

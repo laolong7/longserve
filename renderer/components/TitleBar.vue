@@ -2,7 +2,7 @@
   <div class="title-bar" @dblclick="toggleMax">
     <div class="tb-drag">
       <span class="tb-logo">◆</span>
-      <span class="tb-title">Laolong Server Utilities</span>
+      <span class="tb-title">Longserve</span>
     </div>
     <div class="tb-actions">
       <button class="tb-btn tb-about" title="使用指南" @click="openGuide()">📖</button>
