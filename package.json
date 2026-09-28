@@ -1,7 +1,7 @@
 {
   "name": "laoji-server-tool",
   "productName": "牢笼服务器工具",
-  "version": "1.0.0",
+  "version": "1.3.2",
   "description": "带 AI 副驾的服务器终端管理工具",
   "main": "main/main.js",
   "author": "牢笼 & 逐光",

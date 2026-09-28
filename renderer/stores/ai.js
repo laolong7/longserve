@@ -270,6 +270,12 @@ export const useAiStore = defineStore('ai', {
         this.lastError = '请先在右上角 AI 设置中添加并选择一个 AI 配置'
         return
       }
+      // 密钥解密失败/为空：直接拦截，不发请求（哨兵值由主进程 store.js 注入）
+      const key = config.activeProvider.apiKey || ''
+      if (key.includes('DECRYPT_FAILED') || !key.trim()) {
+        this.lastError = 'API Key 解密失败或未填写，请到右上角 AI 设置重新填写 API Key'
+        return
+      }
       // 缓存桌面路径（systemContext 注入用；失败不阻塞对话）
       if (!this._desktopPath) {
         try { this._desktopPath = await window.api.localDesktop() } catch { /* 忽略 */ }
@@ -368,7 +374,17 @@ export const useAiStore = defineStore('ai', {
           })
         ]
 
-        const cleanup = () => unsubs.forEach((u) => u())
+        const cleanup = () => {
+          clearTimeout(watchdog)
+          unsubs.forEach((u) => u())
+        }
+
+        // 渲染层兜底看门狗：主进程看门狗（总时长 5 分钟）失效时强制结束，
+        // 保证 running 状态永远能回到 false，"…"不会永远转
+        const watchdog = setTimeout(() => {
+          cleanup()
+          resolve({ error: 'AI 响应超时（5 分钟无回应），请重试；若持续出现请检查网络或重填 API Key' })
+        }, 330000)
 
         const body = {
           messages: this.toOpenAiMessages(),

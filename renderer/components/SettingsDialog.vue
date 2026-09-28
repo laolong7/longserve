@@ -537,7 +537,7 @@ async function fetchModels() {
   }
   fetchingModels.value = true
   try {
-    const res = await window.api.aiListModels({ baseUrl: f.baseUrl, apiKey: f.apiKey })
+    const res = await window.api.aiListModels({ protocol: f.protocol === 'anthropic' ? 'anthropic' : 'openai', baseUrl: f.baseUrl, apiKey: f.apiKey })
     if (res.ok) {
       modelOptions.value = res.models
       if (!res.models.length) alert('该服务未返回模型列表')
