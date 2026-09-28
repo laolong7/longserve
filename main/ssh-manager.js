@@ -87,8 +87,8 @@ class SshManager {
         port: Number(instance.port) || 22,
         username: instance.username,
         password: instance.password,
-        keepaliveInterval: 30000,
-        keepaliveCountMax: 6,
+        keepaliveInterval: 15000, // 15s 心跳，防 NAT/防火墙空闲回收
+        keepaliveCountMax: 10,    // 容忍 150s 无响应再判死
         readyTimeout: 20000,
         tryKeyboard: true
       })
@@ -124,6 +124,7 @@ class SshManager {
   close(connId) {
     const meta = this.conns.get(connId)
     if (!meta) return
+    meta.intentional = true // 标记主动断开，渲染层不再自动重连
     this.handleClose(connId, '手动断开')
     try { meta.conn.end() } catch { /* 已断开时忽略 */ }
   }
@@ -137,8 +138,12 @@ class SshManager {
     const meta = this.conns.get(connId)
     if (!meta || meta.closed) return
     meta.closed = true
-    this.send(`term:close:${connId}`, { reason })
+    this.send(`term:close:${connId}`, {
+      reason,
+      intentional: !!meta.intentional // 区分手动断开/意外掉线
+    })
     this.conns.delete(connId)
+    this.onClosed && this.onClosed(connId)
   }
 
   // 获取底层 Client（供 SFTP 复用同一 TCP 连接）

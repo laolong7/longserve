@@ -38,6 +38,14 @@ class SftpManager {
 
   // ---------- 目录操作 ----------
 
+  // ssh2 的 sftp.readdir 是回调风格，必须包装成 Promise（直接 await 会得到 undefined）
+  readdir(sftp, dirPath) {
+    return new Promise((resolve, reject) => {
+      sftp.readdir(dirPath, (err, list) => (err ? reject(new Error(err.message)) : resolve(list)))
+    })
+  }
+
+
   // 探测登录用户的 home 目录（realpath '.'）
   async home(connId) {
     const sftp = await this.requestSftp(connId)
@@ -48,7 +56,7 @@ class SftpManager {
 
   async list(connId, dirPath) {
     const sftp = await this.requestSftp(connId)
-    const raw = await sftp.readdir(dirPath)
+    const raw = await this.readdir(sftp, dirPath)
     const entries = raw.map((it) => {
       const st = it.attrs
       return {
@@ -92,7 +100,7 @@ class SftpManager {
       })
       return
     }
-    const raw = await sftp.readdir(targetPath)
+    const raw = await this.readdir(sftp, targetPath)
     for (const it of raw) {
       const childIsDir = (it.attrs.mode & 0o170000) === 0o040000
       await this.remove(connId, joinRemote(targetPath, it.filename), childIsDir)
@@ -252,7 +260,7 @@ class SftpManager {
         }
       }
     } else {
-      const raw = await sftp.readdir(remoteRoot)
+      const raw = await this.readdir(sftp, remoteRoot)
       for (const it of raw) {
         const rp = joinRemote(remoteRoot, it.filename)
         const lp = path.join(localRoot, it.filename)

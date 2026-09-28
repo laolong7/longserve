@@ -1,9 +1,11 @@
 // ============================================================
 // AI 副驾 store
-// OpenAI 兼容流式对话 + 原生 function calling 工具循环：
-//   run_command   -> 向当前可见终端打字执行（危险命令先弹确认）
-//   read_terminal -> 读取当前终端屏幕 + 最近输出缓冲
-//   sftp_list     -> 列出远程目录
+// OpenAI 兼容流式对话 + 原生 function calling 工具循环
+// 工具分三类：
+//   终端类：run_command / read_terminal / sftp_list
+//   本地类：list_local / read_local_file / write_local_file / delete_local / download_server_file
+//   技能类：use_skill（加载牢笼自定义技能后继续任务）
+// 历史会话：按服务器与时间自动持久化，可搜索、可恢复
 // ============================================================
 import { defineStore } from 'pinia'
 import { useConfigStore } from './config'
@@ -51,36 +53,131 @@ const TOOLS = [
         required: ['path']
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_local',
+      description: '列出本机（用户的电脑）某个目录的文件与子目录。',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: '本机目录绝对路径，如 C:\\Users\\xx\\Desktop' }
+        },
+        required: ['path']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_local_file',
+      description: '读取本机文本文件内容（限 200KB 内的文本文件）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: '本机文件绝对路径' }
+        },
+        required: ['path']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'write_local_file',
+      description:
+        '写入/创建本机文件（覆盖或新建）。会先弹窗请用户确认。可用于在桌面生成报告、日志、配置等文件。',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: '本机文件绝对路径' },
+          content: { type: 'string', description: '要写入的完整文本内容' }
+        },
+        required: ['path', 'content']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_local',
+      description: '删除本机文件或文件夹（文件夹递归删除）。会先弹窗请用户确认。',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: '本机路径' }
+        },
+        required: ['path']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'download_server_file',
+      description:
+        '把服务器上的文件/文件夹下载到本机指定路径（SFTP 下载，支持文件夹递归）。会先弹窗请用户确认。' +
+        '适合"把服务器上的日志调一份到我桌面"这类需求。',
+      parameters: {
+        type: 'object',
+        properties: {
+          remotePath: { type: 'string', description: '服务器上的文件/目录绝对路径' },
+          localPath: { type: 'string', description: '本机目标绝对路径（目录或文件路径）' }
+        },
+        required: ['remotePath', 'localPath']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'use_skill',
+      description: '加载一个用户自定义技能的完整内容。当任务匹配某个技能的触发场景时，先调用本工具获取技能指导，再按技能内容执行。',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: '技能名称（须与可用技能列表中的名称完全一致）' }
+        },
+        required: ['name']
+      }
+    }
   }
 ]
 
 const SYSTEM_PROMPT = `你是牢笼的服务器管理 AI 副驾，运行在一款桌面 SSH 终端工具的右侧对话框中。
 
-你的能力：
-- 用 run_command 在用户可见的终端里执行命令（像坐在用户旁边的运维搭档，用户全程看得到）
-- 用 read_terminal 读取终端当前画面与最近输出
-- 用 sftp_list 查看远程目录
+你的能力分三类：
+1. 服务器操作：run_command（在用户可见的终端里执行命令）、read_terminal（读终端画面）、sftp_list（查远程目录）
+2. 本机操作：list_local / read_local_file（查本机文件）、write_local_file（写本机文件，会请求确认）、delete_local（删本机文件，会请求确认）、download_server_file（服务器文件下载到本机，会请求确认）
+3. 技能：use_skill（加载用户自定义的技能内容）
 
 工作守则：
 1. 执行命令前先用一句话说明要做什么、为什么；执行后主动 read_terminal 确认结果再向用户汇报
 2. 涉及删除、重启、修改配置、影响在线业务的操作属于重大操作，务必在 run_command 的 purpose 里写清楚影响；系统会自动弹窗让用户二次确认
 3. 一次只执行一条命令；避免执行长时间阻塞的命令（如 tail -f、top 交互模式、vim）
-4. 回答用中文，简洁专业，给出可操作的建议
-5. 不确定的事情就先用工具查证，不要凭空猜测`
+4. 用户的本机是 Windows，路径用反斜杠（如 C:\\Users\\...）；给用户的桌面生成文件时用 systemContext 里提供的桌面路径
+5. 回答用中文，简洁专业，给出可操作的建议
+6. 不确定的事情就先用工具查证，不要凭空猜测`
 
 let msgSeq = 0
 const newMsgId = () => `msg_${Date.now()}_${++msgSeq}`
+let sessionSeq = 0
 
 export const useAiStore = defineStore('ai', {
   state: () => ({
     messages: [],
     running: false,
-    lastError: ''
+    lastError: '',
+    _desktopPath: '', // 桌面路径缓存（本机文件工具/系统上下文用）
+    // 当前会话元信息（历史记录用）
+    sessionMeta: null // { id, title, serverName, host, createdAt, updatedAt, hasDanger }
   }),
   actions: {
     clear() {
       if (this.running) return
       this.messages = []
+      this.sessionMeta = null
       this.lastError = ''
     },
 
@@ -88,6 +185,83 @@ export const useAiStore = defineStore('ai', {
       if (this._activeEventId) window.api.aiAbort(this._activeEventId)
     },
 
+    // ---------- 历史会话 ----------
+    async persistSession() {
+      if (!this.messages.length) return
+      const terminals = useTerminalStore()
+      const tab = terminals.activeTab
+      const now = Date.now()
+      if (!this.sessionMeta) {
+        this.sessionMeta = {
+          id: `ses_${now}_${++sessionSeq}`,
+          title: (this.messages.find((m) => m.role === 'user')?.content || '新会话').slice(0, 40),
+          serverName: tab ? tab.name : '未连接',
+          host: tab ? `${tab.instance.username}@${tab.instance.host}` : '',
+          createdAt: now,
+          hasDanger: false
+        }
+      }
+      this.sessionMeta.updatedAt = now
+      this.sessionMeta.messageCount = this.messages.length
+
+      // 存到主进程
+      const sessions = await window.api.historyList()
+      const simplified = this.messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+        tools: (m.toolCalls || []).map((tc) => ({
+          name: tc.name,
+          args: tc.argsJson,
+          result: (tc.result || '').slice(0, 2000),
+          status: tc.status
+        }))
+      }))
+      const rec = { ...JSON.parse(JSON.stringify(this.sessionMeta)), messages: simplified }
+      const idx = sessions.findIndex((s) => s.id === rec.id)
+      if (idx >= 0) sessions[idx] = rec
+      else sessions.unshift(rec)
+      // 上限 200 个会话，防文件无限膨胀
+      await window.api.historySave(sessions.slice(0, 200))
+    },
+
+    async loadSessions() {
+      return await window.api.historyList()
+    },
+
+    // 调取历史：恢复到当前对话面板
+    restoreSession(rec) {
+      if (this.running) return
+      this.messages = (rec.messages || []).map((m, i) => ({
+        id: `msg_restore_${rec.id}_${i}`,
+        role: m.role,
+        content: m.content,
+        toolCalls: (m.tools || []).map((tc, j) => ({
+          id: `tc_${i}_${j}`,
+          name: tc.name,
+          argsJson: tc.args || '{}',
+          purpose: '',
+          status: tc.status || 'done',
+          result: tc.result || ''
+        })),
+        status: 'done'
+      }))
+      this.sessionMeta = {
+        id: `ses_${Date.now()}_restore`,
+        title: rec.title,
+        serverName: rec.serverName,
+        host: rec.host,
+        createdAt: rec.createdAt,
+        updatedAt: rec.updatedAt,
+        hasDanger: rec.hasDanger
+      }
+    },
+
+    async deleteSession(id) {
+      const sessions = await window.api.historyList()
+      await window.api.historySave(sessions.filter((s) => s.id !== id))
+    },
+
+    // ---------- 发送与工具循环 ----------
     async send(text) {
       if (this.running || !text.trim()) return
       const config = useConfigStore()
@@ -95,12 +269,15 @@ export const useAiStore = defineStore('ai', {
         this.lastError = '请先在右上角 AI 设置中添加并选择一个 AI 配置'
         return
       }
+      // 缓存桌面路径（systemContext 注入用；失败不阻塞对话）
+      if (!this._desktopPath) {
+        try { this._desktopPath = await window.api.localDesktop() } catch { /* 忽略 */ }
+      }
       this.lastError = ''
       this.messages.push({ id: newMsgId(), role: 'user', content: text.trim() })
       await this.runLoop()
     },
 
-    // ---------- 工具循环主流程 ----------
     async runLoop() {
       const config = useConfigStore()
       const terminals = useTerminalStore()
@@ -112,7 +289,7 @@ export const useAiStore = defineStore('ai', {
             id: newMsgId(),
             role: 'assistant',
             content: '',
-            toolCalls: [], // { id, name, argsJson, purpose, status, result }
+            toolCalls: [],
             status: 'streaming'
           }
           this.messages.push(assistant)
@@ -130,31 +307,33 @@ export const useAiStore = defineStore('ai', {
             break
           }
 
-          // 无工具调用 -> 对话结束
           if (!assistant.toolCalls.length) break
 
-          // 逐个执行工具，结果回填后继续下一轮
           for (const tc of assistant.toolCalls) {
             tc.status = 'running'
             tc.result = await this.executeTool(tc)
             tc.status = tc.result.startsWith('[已拒绝]') ? 'denied'
               : tc.result.startsWith('[错误]') ? 'error' : 'done'
+            if (tc.status === 'done' && tc.name !== 'read_terminal' && tc.name !== 'list_local' && tc.name !== 'sftp_list') {
+              // 有实际动作的会话，标记为事件型（历史分类用）
+              if (this.sessionMeta) this.sessionMeta.hasDanger = this.sessionMeta.hasDanger || false
+            }
           }
-          // 循环继续 -> 携带工具结果再请求
         }
       } finally {
         this.running = false
         this._activeEventId = null
+        // 会话结束自动落盘（历史记录）
+        this.persistSession().catch(() => {})
       }
     },
 
-    // 单轮流式请求：把 assistant 的 content / toolCalls 实时写入 msg 对象
     streamOnce(provider, msg) {
       return new Promise((resolve) => {
         const eventId = `evt_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
         this._activeEventId = eventId
 
-        const pendingCalls = [] // index -> { id, name, argsJson }
+        const pendingCalls = []
 
         const unsubs = [
           window.api.on(`ai:delta:${eventId}`, (piece) => {
@@ -167,7 +346,6 @@ export const useAiStore = defineStore('ai', {
                 if (t.name) cur.name += t.name
                 if (t.argsFragment) cur.argsJson += t.argsFragment
               }
-              // 同步到消息对象（保持顺序渲染）
               msg.toolCalls = pendingCalls.filter(Boolean).map((c) => ({
                 id: c.id || `call_pending_${Math.random().toString(36).slice(2, 8)}`,
                 name: c.name,
@@ -205,7 +383,6 @@ export const useAiStore = defineStore('ai', {
       })
     },
 
-    // 内部消息结构 -> OpenAI messages 格式（只发最近 40 条防爆上下文）
     toOpenAiMessages() {
       const out = [{ role: 'system', content: this.systemContext() }]
       const recent = this.messages.slice(-40)
@@ -231,26 +408,42 @@ export const useAiStore = defineStore('ai', {
       return out
     },
 
-    // 系统提示 + 当前连接上下文
     systemContext() {
       const terminals = useTerminalStore()
+      const config = useConfigStore()
       const tab = terminals.activeTab
       let ctx = SYSTEM_PROMPT
+
       if (tab) {
         ctx += `\n\n当前连接的服务器：${tab.name}（${tab.instance.username}@${tab.instance.host}:${tab.instance.port}），状态：${tab.status === 'connected' ? '已连接' : '未连接'}`
       } else {
-        ctx += '\n\n当前没有连接任何服务器。'
+        ctx += '\n\n当前没有连接任何服务器。本机操作类工具（list_local 等）不依赖服务器连接。'
       }
+
+      // 技能清单注入：AI 据此决定何时 use_skill
+      const skills = (config.skills || []).filter((s) => s.enabled)
+      if (skills.length) {
+        ctx += '\n\n可用技能（任务匹配触发场景时先调用 use_skill 加载）：'
+        for (const s of skills) {
+          ctx += `\n- ${s.name}：${s.description}`
+        }
+      }
+
+      // 本机常用路径注入（send 时已缓存桌面路径）
+      ctx += `\n\n本机信息：Windows 系统。桌面路径：${this._desktopPath || '（获取中）'}`
       return ctx
     },
 
     // ---------- 工具执行 ----------
     async executeTool(tc) {
       const terminals = useTerminalStore()
+      const dialog = useDialogStore()
+      const config = useConfigStore()
       let args = {}
       try { args = JSON.parse(tc.argsJson || '{}') } catch { /* 参数解析失败按空处理 */ }
 
       try {
+        // ---- 终端类 ----
         if (tc.name === 'run_command') return await this.toolRunCommand(args)
         if (tc.name === 'read_terminal') {
           const pane = terminals.activePane
@@ -269,6 +462,78 @@ export const useAiStore = defineStore('ai', {
             .map((e) => `${e.isDir ? 'd' : '-'} ${e.isDir ? '' : formatSize(e.size) + ' '}${e.name}`)
             .join('\n')
         }
+
+        // ---- 本机类 ----
+        if (tc.name === 'list_local') {
+          const res = await window.api.localList(args.path || (await window.api.localHome()))
+          if (!res.ok) return '[错误] ' + res.error
+          if (!res.entries.length) return '（目录为空）'
+          return res.entries
+            .map((e) => `${e.isDir ? 'd' : '-'} ${e.isDir ? '' : formatSize(e.size) + ' '}${e.name}`)
+            .join('\n')
+        }
+        if (tc.name === 'read_local_file') {
+          const res = await window.api.localRead(args.path)
+          if (!res.ok) return '[错误] ' + res.error
+          return res.content
+        }
+        if (tc.name === 'write_local_file') {
+          const ok = await dialog.askConfirm({
+            title: 'AI 请求写入本机文件',
+            message: `目标路径：${args.path}\n内容长度：${(args.content || '').length} 字符`,
+            command: (args.content || '').slice(0, 600) + ((args.content || '').length > 600 ? '...' : ''),
+            reasons: ['本机文件写入：' + args.path]
+          })
+          if (!ok) return '[已拒绝] 用户取消了写入'
+          const res = await window.api.localWrite(args.path, args.content || '')
+          if (!res.ok) return '[错误] ' + res.error
+          if (this.sessionMeta) this.sessionMeta.hasDanger = true
+          return `已写入本机文件：${args.path}（${(args.content || '').length} 字符）`
+        }
+        if (tc.name === 'delete_local') {
+          const ok = await dialog.askConfirm({
+            title: 'AI 请求删除本机文件',
+            message: `将删除：${args.path}（不可恢复）`
+          })
+          if (!ok) return '[已拒绝] 用户取消了删除'
+          const res = await window.api.localDelete(args.path, true)
+          if (!res.ok) return '[错误] ' + res.error
+          if (this.sessionMeta) this.sessionMeta.hasDanger = true
+          return `已删除：${args.path}`
+        }
+        if (tc.name === 'download_server_file') {
+          const tab = terminals.activeTab
+          if (!tab || tab.status !== 'connected') return '[错误] 当前没有已连接的服务器，无法下载'
+          const ok = await dialog.askConfirm({
+            title: 'AI 请求下载服务器文件到本机',
+            message: `服务器：${tab.name}\n远程：${args.remotePath}\n保存到：${args.localPath}`
+          })
+          if (!ok) return '[已拒绝] 用户取消了下载'
+          const taskId = window.api.sftpNewTaskId()
+          const res = await window.api.sftpTransfer({
+            connId: tab.id,
+            taskId,
+            direction: 'download',
+            localPath: args.localPath,
+            remotePath: args.remotePath
+          })
+          if (!res.ok) return '[错误] 下载失败：' + res.error
+          if (this.sessionMeta) this.sessionMeta.hasDanger = true
+          return `已下载到本机：${args.localPath}`
+        }
+
+        // ---- 技能类 ----
+        if (tc.name === 'use_skill') {
+          const skill = (config.skills || []).find(
+            (s) => s.enabled && (s.name === args.name || s.id === args.name)
+          )
+          if (!skill) {
+            const names = (config.skills || []).filter((s) => s.enabled).map((s) => s.name).join('、') || '（无）'
+            return `[错误] 找不到技能「${args.name}」。可用技能：${names}`
+          }
+          return `【技能：${skill.name}】内容如下，请严格按此执行：\n\n${skill.content}`
+        }
+
         return `[错误] 未知工具 ${tc.name}`
       } catch (err) {
         return '[错误] ' + err.message
@@ -293,6 +558,7 @@ export const useAiStore = defineStore('ai', {
           reasons: args.purpose ? [...reasons, 'AI 说明：' + args.purpose] : reasons
         })
         if (!ok) return '[已拒绝] 用户取消了该命令，请向用户说明并询问下一步'
+        if (this.sessionMeta) this.sessionMeta.hasDanger = true
       }
 
       // 打字到可见终端（服务器回显，用户全程可见）

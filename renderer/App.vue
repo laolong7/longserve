@@ -30,18 +30,19 @@
 
     <!-- 右栏：AI 副驾 -->
     <div class="right-col" :style="{ width: rightW + 'px' }">
-      <AiChat @open-settings="openSettings('ai')" />
+      <AiChat @open-settings="openSettings('ai')" @open-history="openHistory" />
     </div>
 
     <!-- 全局弹窗 -->
     <DialogHost />
     <SettingsDialog ref="settingsRef" />
     <FileTransferDialog ref="filesRef" />
+    <HistoryDialog ref="historyRef" />
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, provide } from 'vue'
+import { ref, onMounted, provide, watch } from 'vue'
 import InstanceList from './components/InstanceList.vue'
 import TerminalTabs from './components/TerminalTabs.vue'
 import TerminalPane from './components/TerminalPane.vue'
@@ -49,20 +50,29 @@ import AiChat from './components/AiChat.vue'
 import DialogHost from './components/DialogHost.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import FileTransferDialog from './components/FileTransferDialog.vue'
+import HistoryDialog from './components/HistoryDialog.vue'
 import { useConfigStore } from './stores/config'
 import { useTerminalStore } from './stores/terminals'
+import { applyAppearance } from './utils/appearance'
 
 const config = useConfigStore()
 const store = useTerminalStore()
 
 const settingsRef = ref(null)
 const filesRef = ref(null)
+const historyRef = ref(null)
 // action: { type:'new-instance' } | { type:'edit-instance', id } | undefined
 const openSettings = (tabName, action) => settingsRef.value?.open(tabName, action)
 const openFiles = () => filesRef.value?.open()
+const openHistory = () => historyRef.value?.open()
 provide('openSettings', openSettings)
 
-onMounted(() => config.init())
+onMounted(async () => {
+  await config.init()
+  applyAppearance(config.appearance)
+})
+// 外观设置变化即时生效
+watch(() => config.appearance, (a) => applyAppearance(a), { deep: true })
 
 // ---------- 栏宽拖拽 ----------
 const leftW = ref(240)

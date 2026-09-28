@@ -41,11 +41,16 @@ contextBridge.exposeInMainWorld('api', {
   // ---------- 本地文件 ----------
   localList: (dirPath) => ipcRenderer.invoke('local:list', dirPath),
   localHome: () => ipcRenderer.invoke('local:home'),
+  localDesktop: () => ipcRenderer.invoke('local:desktop'),
+  localRead: (filePath) => ipcRenderer.invoke('local:read', filePath),
+  localWrite: (filePath, content) => ipcRenderer.invoke('local:write', filePath, content),
   localMkdir: (dirPath) => ipcRenderer.invoke('local:mkdir', dirPath),
   localDelete: (targetPath, isDir) => ipcRenderer.invoke('local:delete', targetPath, isDir),
   localRename: (oldPath, newPath) => ipcRenderer.invoke('local:rename', oldPath, newPath),
 
   // ---------- AI ----------
+  historyList: () => ipcRenderer.invoke('history:list'),
+  historySave: (sessions) => ipcRenderer.invoke('history:save', sessions),
   aiChat: (opts) => ipcRenderer.invoke('ai:chat', opts),
   aiAbort: (eventId) => ipcRenderer.send('ai:abort', eventId),
   aiListModels: (provider) => ipcRenderer.invoke('ai:listModels', provider),

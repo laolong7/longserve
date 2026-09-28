@@ -15,6 +15,7 @@
         </option>
       </select>
       <button class="ghost icon-sm" title="AI 设置" @click="emit('open-settings')">⚙</button>
+      <button class="ghost icon-sm" title="历史会话记录" @click="emit('open-history')">📜</button>
       <button class="ghost icon-sm" title="清空对话" :disabled="ai.running" @click="ai.clear()">🗑</button>
     </div>
 
@@ -88,7 +89,7 @@ import { ref, computed, nextTick, watch } from 'vue'
 import { useConfigStore } from '../stores/config'
 import { useAiStore } from '../stores/ai'
 
-const emit = defineEmits(['open-settings'])
+const emit = defineEmits(['open-settings', 'open-history'])
 const config = useConfigStore()
 const ai = useAiStore()
 

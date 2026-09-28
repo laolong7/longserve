@@ -22,6 +22,8 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { useTerminalStore } from '../stores/terminals'
+import { useConfigStore } from '../stores/config'
+import { applyAppearance } from '../utils/appearance'
 
 const props = defineProps({
   tab: { type: Object, required: true },
@@ -29,6 +31,7 @@ const props = defineProps({
 })
 
 const store = useTerminalStore()
+const config = useConfigStore()
 const hostEl = ref(null)
 
 let term = null
@@ -130,10 +133,14 @@ function bindConn(connId) {
       term.write(u8)
       ringPush(u8)
     })
-    unsubClose = window.api.on(`term:close:${connId}`, () => {
-      // store 会同步 tab.status，这里兜底输出提示
+    unsubClose = window.api.on(`term:close:${connId}`, (info) => {
+      // 同步 store 状态（此前断线后 status 卡在 connected 的 bug）
       if (props.tab.status === 'connected') {
+        props.tab.status = 'closed'
+        props.tab.error = info && info.reason && info.reason !== '会话已结束' ? info.reason : null
         term.writeln('\r\n\x1b[33m※ 连接已断开\x1b[0m')
+        // 非主动断开：自动重连（最多 3 次，间隔 3s）
+        if (!info || !info.intentional) store.scheduleReconnect(props.tab)
       }
     })
     const pending = await window.api.sshAttach(connId)
@@ -153,6 +160,26 @@ watch(
     if (newId !== lastConnId && newId) bindConn(newId)
   }
 )
+// 外观设置变化：终端背景/前景/光标/字号实时跟随
+watch(
+  () => config.appearance,
+  (a) => {
+    if (!term) return
+    const t = applyAppearance(a)
+    if (t) {
+      term.options.theme = { ...term.options.theme, background: t.background, foreground: t.foreground, cursor: t.cursor }
+    } else {
+      term.options.theme = { ...term.options.theme, background: '#14161b', foreground: '#d8dce4', cursor: '#3fdc97' }
+    }
+    const fs = a && a.termFontSize ? Number(a.termFontSize) : 14
+    if (term.options.fontSize !== fs) {
+      term.options.fontSize = fs
+      nextTick(fit)
+    }
+  },
+  { deep: true }
+)
+
 // 切换到该标签时重新适配尺寸（v-show 隐藏期间容器为 0 尺寸）
 watch(
   () => props.active,
@@ -176,7 +203,7 @@ watch(
 
 onMounted(() => {
   term = new Terminal({
-    fontSize: 14,
+    fontSize: (config.appearance && config.appearance.termFontSize) || 14,
     fontFamily: "'Cascadia Mono', 'Consolas', monospace",
     cursorBlink: true,
     scrollback: 5000,

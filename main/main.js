@@ -195,6 +195,28 @@ function registerIpc() {
   })
 
   // ---------- AI ----------
+  ipcMain.handle('history:list', () => store.loadHistory())
+  ipcMain.handle('history:save', (_e, sessions) => store.saveHistory(sessions))
+
+  // AI 本地文件操作工具（读写删一律由渲染层弹确认后才调用）
+  ipcMain.handle('local:read', async (_e, filePath) => {
+    try {
+      const st = fs.statSync(filePath)
+      if (st.isDirectory()) return { ok: false, error: '目标是文件夹，不是文件' }
+      if (st.size > 200 * 1024) return { ok: false, error: `文件过大（${Math.round(st.size / 1024)}KB），仅支持读取 200KB 内的文本文件` }
+      const content = fs.readFileSync(filePath, 'utf8')
+      return { ok: true, content }
+    } catch (err) { return { ok: false, error: err.message } }
+  })
+  ipcMain.handle('local:write', async (_e, filePath, content) => {
+    try {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true })
+      fs.writeFileSync(filePath, content, 'utf8')
+      return { ok: true }
+    } catch (err) { return { ok: false, error: err.message } }
+  })
+  ipcMain.handle('local:desktop', () => app.getPath('desktop'))
+
   ipcMain.handle('ai:chat', async (_e, opts) => {
     // opts: { eventId, provider: {baseUrl, apiKey, model}, body: OpenAI 请求体 }
     await aiProxy.chatStream(opts, (type, data) => send(`ai:${type}:${opts.eventId}`, data))
@@ -214,6 +236,7 @@ app.whenReady().then(() => {
   store.init(app)
   sshManager = new SshManager(send)
   sftpManager = new SftpManager(sshManager)
+  sshManager.onClosed = (connId) => sftpManager.dropCache(connId)
   registerIpc()
   createWindow()
 

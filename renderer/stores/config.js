@@ -6,6 +6,8 @@ export const useConfigStore = defineStore('config', {
     instances: [],
     aiProviders: [],
     activeAiProviderId: null,
+    skills: [],
+    appearance: null,
     loaded: false
   }),
   getters: {
@@ -20,6 +22,8 @@ export const useConfigStore = defineStore('config', {
       this.instances = cfg.instances || []
       this.aiProviders = cfg.aiProviders || []
       this.activeAiProviderId = cfg.activeAiProviderId || null
+      this.skills = cfg.skills || []
+      this.appearance = cfg.appearance || null
       // 自动选中第一个 AI 配置
       if (!this.activeAiProviderId && this.aiProviders.length) {
         this.activeAiProviderId = this.aiProviders[0].id
@@ -31,6 +35,8 @@ export const useConfigStore = defineStore('config', {
         instances: JSON.parse(JSON.stringify(this.instances)),
         aiProviders: JSON.parse(JSON.stringify(this.aiProviders)),
         activeAiProviderId: this.activeAiProviderId,
+        skills: JSON.parse(JSON.stringify(this.skills)),
+        appearance: this.appearance ? JSON.parse(JSON.stringify(this.appearance)) : null,
         seq: Date.now() % 100000
       })
     },
@@ -39,6 +45,9 @@ export const useConfigStore = defineStore('config', {
     },
     newProviderId() {
       return `ai_${Date.now()}_${Math.floor(Math.random() * 1e5)}`
+    },
+    newSkillId() {
+      return `sk_${Date.now()}_${Math.floor(Math.random() * 1e5)}`
     }
   }
 })

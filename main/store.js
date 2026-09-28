@@ -8,10 +8,12 @@ const path = require('path')
 const { safeStorage } = require('electron')
 
 let configFile = null
+let historyFile = null
 let cache = null
 
 function init(app) {
   configFile = path.join(app.getPath('userData'), 'config.json')
+  historyFile = path.join(app.getPath('userData'), 'history.json')
 }
 
 function defaults() {
@@ -19,6 +21,8 @@ function defaults() {
     instances: [],          // { id, name, host, port, username, password }
     aiProviders: [],        // { id, name, baseUrl, apiKey, model }
     activeAiProviderId: null,
+    skills: [],             // { id, name, description, content, enabled }
+    appearance: null,       // { accent, text, bgHue, bgAlpha } null=默认主题
     seq: 0                  // id 生成计数器
   }
 }
@@ -27,6 +31,8 @@ function normalize(raw) {
   const cfg = { ...defaults(), ...(raw || {}) }
   if (!Array.isArray(cfg.instances)) cfg.instances = []
   if (!Array.isArray(cfg.aiProviders)) cfg.aiProviders = []
+  if (!Array.isArray(cfg.skills)) cfg.skills = []
+  if (!cfg.appearance || typeof cfg.appearance !== 'object') cfg.appearance = null
   // 实例字段补全
   for (const inst of cfg.instances) {
     inst.id = inst.id || `inst_${Date.now()}_${++cfg.seq}`
@@ -37,6 +43,10 @@ function normalize(raw) {
   for (const p of cfg.aiProviders) {
     p.id = p.id || `ai_${Date.now()}_${++cfg.seq}`
     p.name = p.name || '未命名配置'
+  }
+  for (const s of cfg.skills) {
+    s.id = s.id || `sk_${Date.now()}_${++cfg.seq}`
+    s.enabled = s.enabled !== false
   }
   return cfg
 }
@@ -86,4 +96,19 @@ function save(cfg) {
   cache = normalize(JSON.parse(JSON.stringify(cfg)))
 }
 
-module.exports = { init, load, save }
+// ---------- AI 历史会话（独立文件，不加密，结构与 config 分离） ----------
+function loadHistory() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(historyFile, 'utf8'))
+    return Array.isArray(raw.sessions) ? raw.sessions : []
+  } catch {
+    return []
+  }
+}
+
+function saveHistory(sessions) {
+  fs.mkdirSync(path.dirname(historyFile), { recursive: true })
+  fs.writeFileSync(historyFile, JSON.stringify({ sessions }, null, 2), 'utf8')
+}
+
+module.exports = { init, load, save, loadHistory, saveHistory }

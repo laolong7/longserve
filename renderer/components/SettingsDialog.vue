@@ -5,6 +5,8 @@
         <div class="set-tabs">
           <div class="set-tab" :class="{ on: tab === 'instances' }" @click="switchTab('instances')">服务器实例</div>
           <div class="set-tab" :class="{ on: tab === 'ai' }" @click="switchTab('ai')">AI 配置</div>
+          <div class="set-tab" :class="{ on: tab === 'skills' }" @click="switchTab('skills')">AI 技能</div>
+          <div class="set-tab" :class="{ on: tab === 'appearance' }" @click="switchTab('appearance')">外观</div>
           <div class="grow"></div>
           <button class="ghost" @click="close">✕</button>
         </div>
@@ -64,6 +66,114 @@
             <div v-else class="empty-hint">
               <div class="big">﹢</div>
               <div>新增或在左侧选择一个实例进行编辑</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ================= AI 技能 ================= -->
+        <div v-else-if="tab === 'skills'" class="set-body">
+          <div class="side-list">
+            <button class="primary" style="width:100%" @click="newSkill">＋ 新增技能</button>
+            <div class="side-items">
+              <div
+                v-for="s in config.skills"
+                :key="s.id"
+                class="side-item"
+                :class="{ on: editingId === s.id }"
+                @click="startEditSkill(s)"
+              >
+                <span class="ellipsis">{{ s.name }}</span>
+                <span class="faint ellipsis" style="font-size:10.5px">{{ s.enabled ? s.description : '（已停用）' }}</span>
+              </div>
+            </div>
+          </div>
+          <div class="form-panel">
+            <template v-if="form">
+              <div class="form-row">
+                <label>技能名称（AI 调用时使用，建议简短明确）</label>
+                <input v-model="form.name" placeholder="如：部署学生急事通" />
+              </div>
+              <div class="form-row">
+                <label>触发场景描述（告诉 AI 什么时候用这个技能）</label>
+                <input v-model="form.description" placeholder="如：当要求部署/重启学子急事通服务时使用" />
+              </div>
+              <div class="form-row">
+                <label>技能内容（AI 加载后会严格按此执行）</label>
+                <textarea
+                  v-model="form.content"
+                  rows="10"
+                  style="resize:vertical; font-family: var(--font-mono); font-size:12px"
+                  placeholder="写清楚步骤、命令、注意事项...&#10;例如：&#10;1. cd /var/www/xxx&#10;2. 拉取最新代码&#10;3. systemctl restart xxx"
+                ></textarea>
+              </div>
+              <label style="display:flex; align-items:center; gap:6px; margin-bottom:14px; cursor:pointer">
+                <input type="checkbox" v-model="form.enabled" style="width:auto" />
+                启用（启用的技能会注入 AI 的技能列表，按场景自动调用）
+              </label>
+              <div class="form-actions">
+                <div class="grow"></div>
+                <button class="danger" v-if="editingId" @click="removeSkillCurrent">删除</button>
+                <button class="primary" @click="saveSkill">保存</button>
+              </div>
+            </template>
+            <div v-else class="empty-hint">
+              <div class="big">⚡</div>
+              <div>把你的固定工作流程做成技能</div>
+              <div class="faint">AI 会在任务匹配时自动加载对应技能</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ================= 外观 ================= -->
+        <div v-else-if="tab === 'appearance'" class="set-body">
+          <div class="form-panel" style="max-width: 560px">
+            <div class="form-row">
+              <label>主题预设</label>
+              <div style="display:flex; gap:8px; flex-wrap:wrap">
+                <div
+                  v-for="p in APPEARANCE_PRESETS"
+                  :key="p.name"
+                  class="preset-card"
+                  :class="{ on: isPresetActive(p) }"
+                  @click="applyPreset(p)"
+                >
+                  <span class="preset-dot" :style="{ background: p.accent }"></span>
+                  <span>{{ p.name }}</span>
+                </div>
+              </div>
+            </div>
+            <div class="form-2col">
+              <div class="form-row">
+                <label>强调色（状态灯/按钮/终端光标）</label>
+                <div style="display:flex; gap:6px; align-items:center">
+                  <input type="color" v-model="draftAccent" @input="updateAppearance" style="width:46px; padding:2px" />
+                  <span class="mono faint">{{ draftAccent }}</span>
+                </div>
+              </div>
+              <div class="form-row">
+                <label>界面文字颜色</label>
+                <div style="display:flex; gap:6px; align-items:center">
+                  <input type="color" v-model="draftText" @input="updateAppearance" style="width:46px; padding:2px" />
+                  <span class="mono faint">{{ draftText }}</span>
+                </div>
+              </div>
+            </div>
+            <div class="form-row">
+              <label>界面背景色相：<span class="mono">{{ draftHue }}°</span></label>
+              <input type="range" min="0" max="360" v-model.number="draftHue" @input="updateAppearance" style="width:100%" />
+            </div>
+            <div class="form-row">
+              <label>界面透明度：<span class="mono">{{ draftAlpha }}%</span>（数值越小界面越通透）</label>
+              <input type="range" min="30" max="100" v-model.number="draftAlpha" @input="updateAppearance" style="width:100%" />
+            </div>
+            <div class="form-row">
+              <label>终端字号：<span class="mono">{{ draftFs }}px</span></label>
+              <input type="range" min="11" max="20" v-model.number="draftFs" @input="updateAppearance" style="width:100%" />
+            </div>
+            <div class="form-actions">
+              <button @click="resetAppearance">恢复默认</button>
+              <div class="grow"></div>
+              <div class="faint" style="align-self:center">改动即时生效并自动保存</div>
             </div>
           </div>
         </div>
@@ -134,8 +244,9 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, watch } from 'vue'
 import { useConfigStore } from '../stores/config'
+import { APPEARANCE_PRESETS } from '../utils/appearance'
 
 const config = useConfigStore()
 const visible = ref(false)
@@ -144,6 +255,89 @@ const editingId = ref(null)
 const form = ref(null)
 const fetchingModels = ref(false)
 const modelOptions = ref([])
+
+// 外观草稿（即时生效）
+const draftAccent = ref('#3fdc97')
+const draftText = ref('#d8dce4')
+const draftHue = ref(222)
+const draftAlpha = ref(100)
+const draftFs = ref(14)
+
+function syncDrafts() {
+  const a = config.appearance
+  draftAccent.value = a?.accent || '#3fdc97'
+  draftText.value = a?.text || '#d8dce4'
+  draftHue.value = a?.bgHue ?? 222
+  draftAlpha.value = a?.bgAlpha ?? 100
+  draftFs.value = a?.termFontSize ?? 14
+}
+watch(tab, (t) => { if (t === 'appearance') syncDrafts() })
+
+function updateAppearance() {
+  const a = {
+    accent: draftAccent.value,
+    text: draftText.value,
+    bgHue: draftHue.value,
+    bgAlpha: draftAlpha.value,
+    termFontSize: draftFs.value
+  }
+  config.appearance = a
+  config.save()
+}
+function applyPreset(p) {
+  draftAccent.value = p.accent
+  draftText.value = p.text
+  draftHue.value = p.bgHue
+  updateAppearance()
+}
+function isPresetActive(p) {
+  const a = config.appearance
+  return a && a.accent === p.accent && a.bgHue === p.bgHue
+}
+function resetAppearance() {
+  config.appearance = null
+  config.save()
+  syncDrafts()
+}
+
+// ---------- 技能 ----------
+function newSkill() {
+  editingId.value = null
+  form.value = { id: null, name: '', description: '', content: '', enabled: true }
+}
+function startEditSkill(s) {
+  editingId.value = s.id
+  form.value = { ...s }
+}
+async function saveSkill() {
+  const f = form.value
+  if (!f.name || !f.content) {
+    alert('技能名称和内容不能为空')
+    return
+  }
+  const data = {
+    id: f.id || config.newSkillId(),
+    name: f.name.trim(),
+    description: (f.description || '').trim(),
+    content: f.content,
+    enabled: f.enabled !== false
+  }
+  const idx = config.skills.findIndex((s) => s.id === data.id)
+  if (idx >= 0) config.skills[idx] = data
+  else config.skills.push(data)
+  await config.save()
+  editingId.value = data.id
+  form.value = { ...data }
+}
+async function removeSkillCurrent() {
+  const id = editingId.value
+  if (!id) return
+  if (!confirm('确定删除该技能？')) return
+  config.skills = config.skills.filter((s) => s.id !== id)
+  await config.save()
+  form.value = null
+  editingId.value = null
+}
 
 // 打开弹窗：tabName 'instances' | 'ai'，action 可选
 function open(tabName, action) {
@@ -335,4 +529,18 @@ async function fetchModels() {
 .form-panel { flex: 1; padding: 18px 20px; overflow-y: auto; }
 .form-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .form-actions { display: flex; gap: 8px; margin-top: 6px; }
+.preset-card {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  transition: border-color 0.12s;
+}
+.preset-card:hover { border-color: var(--border-strong); }
+.preset-card.on { border-color: var(--green); color: var(--green); }
+.preset-dot { width: 12px; height: 12px; border-radius: 50%; }
 </style>

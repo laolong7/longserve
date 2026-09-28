@@ -1,5 +1,7 @@
 <template>
+  <!-- 确认/输入框必须压在一切业务弹窗（文件传输/设置）之上：z-index 300 -->
   <Teleport to="body">
+
     <!-- 确认框（含危险命令样式） -->
     <div v-if="dlg.confirmVisible" class="modal-mask">
       <div class="modal confirm-modal">
@@ -60,6 +62,8 @@ watch(() => dlg.promptVisible, (v) => {
 </script>
 
 <style scoped>
+/* 最顶层：压过设置/文件传输弹窗（z-index 100），避免输入框被遮挡 */
+.modal-mask { z-index: 300; }
 .confirm-modal { width: 460px; }
 .prompt-modal { width: 400px; }
 .confirm-head {

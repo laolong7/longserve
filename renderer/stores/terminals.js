@@ -59,6 +59,7 @@ export const useTerminalStore = defineStore('terminals', {
       tab.id = res.connId
       tab.status = 'connected'
       tab.error = null
+      tab.__retryCount = 0 // 连上了就清零自动重连计数
       if (this.activeTabId === oldId) this.activeTabId = res.connId
     },
 
@@ -89,6 +90,21 @@ export const useTerminalStore = defineStore('terminals', {
       if (this.activeTabId === tabId) {
         this.activeTabId = this.tabs.length ? this.tabs[Math.max(0, idx - 1)].id : null
       }
+    },
+
+    // 意外掉线自动重连：最多 3 次，间隔 3s（手动断开不触发）
+    scheduleReconnect(tab) {
+      if (!tab || tab.__manualClosed) return
+      tab.__retryCount = (tab.__retryCount || 0) + 1
+      if (tab.__retryCount > 3) {
+        tab.error = '自动重连 3 次均失败，请检查网络后手动重连'
+        return
+      }
+      setTimeout(() => {
+        // 期间用户已手动关标签或已手动重连成功则跳过
+        if (!this.tabs.includes(tab) || tab.status !== 'closed') return
+        this.reconnect(tab)
+      }, 3000)
     },
 
     // 注册/注销终端面板（由 TerminalPane 调用）
