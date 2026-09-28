@@ -15,6 +15,12 @@ export const useDialogStore = defineStore('dialog', {
     promptTitle: '',
     promptValue: '',
     _promptResolve: null,
+    // 多选一弹窗（自定义按钮组，如"重新打开 / 下次打开时应用"）
+    choiceVisible: false,
+    choiceTitle: '',
+    choiceMessage: '',
+    choiceOptions: [], // [{ value, label, kind?: 'primary'|'danger' }]
+    _choiceResolve: null,
     // 轻提示
     toast: '',
     _toastTimer: null
@@ -50,6 +56,22 @@ export const useDialogStore = defineStore('dialog', {
     answerInput(val) {
       this.promptVisible = false
       if (this._promptResolve) { this._promptResolve(val); this._promptResolve = null }
+    },
+
+    // 多选一：Promise<value|null>（点遮罩视为取消）
+    askChoice({ title, message = '', options = [] }) {
+      this.choiceTitle = title || '请选择'
+      this.choiceMessage = message
+      this.choiceOptions = options
+      this.choiceVisible = true
+      return new Promise((resolve) => {
+        if (this._choiceResolve) this._choiceResolve(null)
+        this._choiceResolve = resolve
+      })
+    },
+    answerChoice(value) {
+      this.choiceVisible = false
+      if (this._choiceResolve) { this._choiceResolve(value); this._choiceResolve = null }
     },
 
     // 轻提示（自动消失）

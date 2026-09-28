@@ -53,10 +53,17 @@
                 </div>
                 <div class="form-row">
                   <label>密码</label>
-                  <input v-model="form.password" type="password" class="mono" placeholder="登录密码" />
+                  <div v-if="pwLocked" class="locked-row">
+                    <span class="locked-box">🔒 已锁定，无法查看</span>
+                    <button class="ghost" @click="unlockPassword">重置</button>
+                  </div>
+                  <input v-else v-model="form.password" type="password" class="mono" placeholder="登录密码" />
+                  <div v-if="passwordDecryptFailed" class="key-warn">
+                    ⚠ 已保存的密码无法解密（加密环境变化所致），请重新填写密码并保存
+                  </div>
                 </div>
               </div>
-              <div class="faint" style="margin-bottom:14px">密码使用系统级加密（DPAPI）存储在本机，不上传任何地方。</div>
+              <div class="faint" style="margin-bottom:14px">密码使用系统级加密（DPAPI）存储在本机，不上传任何地方。保存后不再显示，可随时重置更换。</div>
 
               <div class="form-actions">
                 <button class="danger" v-if="editingId" @click="removeInstanceCurrent">删除</button>
@@ -271,7 +278,11 @@
               </div>
               <div class="form-row">
                 <label>API Key</label>
-                <input v-model="form.apiKey" type="password" class="mono" placeholder="sk-... 或 tp-..." />
+                <div v-if="keyLocked" class="locked-row">
+                  <span class="locked-box">🔒 已锁定，无法查看</span>
+                  <button class="ghost" @click="unlockKey">重置</button>
+                </div>
+                <input v-else v-model="form.apiKey" type="password" class="mono" placeholder="sk-... 或 tp-..." />
                 <div v-if="keyDecryptFailed" class="key-warn">
                   ⚠ 已保存的密钥无法解密（加密环境变化所致），请重新粘贴 API Key 并保存
                 </div>
@@ -287,16 +298,6 @@
                   <option v-for="m in modelOptions" :key="m" :value="m"></option>
                 </datalist>
                 <div v-if="testResult" :class="testOk ? 'key-ok' : 'key-warn'">{{ testResult }}</div>
-              </div>
-              <div class="form-row">
-                <label>模型</label>
-                <div style="display:flex; gap:6px">
-                  <input v-model="form.model" class="mono grow" placeholder="deepseek-chat" list="model-suggestions" />
-                  <button @click="fetchModels" :disabled="fetchingModels">{{ fetchingModels ? '获取中...' : '获取列表' }}</button>
-                </div>
-                <datalist id="model-suggestions">
-                  <option v-for="m in modelOptions" :key="m" :value="m"></option>
-                </datalist>
               </div>
 
               <div class="form-actions">
@@ -350,7 +351,7 @@ async function testConn() {
     const res = await window.api.aiListModels({
       protocol: f.protocol === 'anthropic' ? 'anthropic' : 'openai',
       baseUrl: f.baseUrl.trim(),
-      apiKey: f.apiKey || ''
+      apiKey: formApiKey()
     })
     const ms = Date.now() - t0
     if (res.ok) {
@@ -397,9 +398,8 @@ function syncDrafts() {
 }
 watch(tab, (t) => { if (t === 'appearance') syncDrafts() })
 
-function updateAppearance(effectChanged = false) {
+async function updateAppearance(effectChanged = false) {
   const effect = draftEffect.value
-  const prevEffect = config.appearance?.windowEffect || 'none'
   const a = {
     accent: draftAccent.value,
     text: draftText.value,
@@ -412,9 +412,25 @@ function updateAppearance(effectChanged = false) {
   }
   config.appearance = a
   config.save()
-  // 窗口效果是原生窗口属性，无法热切换：改了就重启应用生效
-  if (effectChanged && effect !== prevEffect) {
-    setTimeout(() => window.api.appRelaunch(), 600)
+  if (!effectChanged) return
+  // 窗口效果是原生窗口属性（transparent/backgroundMaterial 创建后不可热切换）。
+  // 切到"不透明"可即时生效无需重启；其余变化弹窗让用户选立即重启还是下次启动生效
+  if (effect === 'none') {
+    config.runtimeEffect = 'none'
+    dialog.showToast('已切换为不透明')
+    return
+  }
+  if (effect !== config.runtimeEffect) {
+    const choice = await dialog.askChoice({
+      title: '窗口效果需要重启应用',
+      message: `「${EFFECTS.find((e) => e.value === effect)?.label || effect}」是系统级窗口效果，重启后才能完整生效。已保存设置。`,
+      options: [
+        { value: 'now', label: '重新打开', kind: 'primary' },
+        { value: 'later', label: '下次打开时应用' }
+      ]
+    })
+    if (choice === 'now') window.api.appRelaunch()
+    // 选"下次打开时应用"：配置已保存，本次渲染继续按旧效果（App.vue 的 effectiveEffect 不动）
   }
 }
 function applyPreset(p) {
@@ -428,11 +444,11 @@ function isPresetActive(p) {
   return a && a.accent === p.accent && a.bgHue === p.bgHue
 }
 function resetAppearance() {
-  const prevEffect = config.appearance?.windowEffect || 'none'
   config.appearance = null
   config.save()
   syncDrafts()
-  if (prevEffect !== 'none') setTimeout(() => window.api.appRelaunch(), 600)
+  config.runtimeEffect = 'none' // 恢复默认即不透明，可直接生效无需重启
+  dialog.showToast('已恢复默认外观')
 }
 
 // ---------- 数据目录 ----------
@@ -520,13 +536,30 @@ function switchTab(name) {
 }
 
 // ---------- 实例 ----------
+const pwLocked = ref(false) // 已存密码锁定态：编辑时不回显明文，只能重置重填
+const passwordDecryptFailed = ref(false)
+
+// 锁定态下保存：沿用原密码（form.password 是 __locked__ 占位，不是真值）
+function savedInstancePassword(id) {
+  return config.instances.find((i) => i.id === id)?.password || ''
+}
+
 function newInstance() {
   editingId.value = null
+  pwLocked.value = false
+  passwordDecryptFailed.value = false
   form.value = { id: null, name: '', host: '', port: 22, username: 'root', password: '' }
 }
 function startEdit(inst) {
   editingId.value = inst.id
-  form.value = { ...inst }
+  // 解密失败哨兵：不锁定、清空待重填，给出醒目提示
+  passwordDecryptFailed.value = inst.password === '\u0000DECRYPT_FAILED'
+  pwLocked.value = !!inst.password && !passwordDecryptFailed.value
+  form.value = { ...inst, password: pwLocked.value ? '__locked__' : '' }
+}
+function unlockPassword() {
+  pwLocked.value = false
+  form.value.password = ''
 }
 async function saveInstance() {
   const f = form.value
@@ -540,7 +573,7 @@ async function saveInstance() {
     host: f.host.trim(),
     port: Number(f.port) || 22,
     username: (f.username || 'root').trim(),
-    password: f.password || ''
+    password: f.password === '__locked__' ? savedInstancePassword(f.id || editingId.value) : (f.password || '')
   }
   const idx = config.instances.findIndex((i) => i.id === data.id)
   if (idx >= 0) config.instances[idx] = data
@@ -560,20 +593,36 @@ function removeInstanceCurrent() {
 }
 
 // ---------- AI ----------
+const keyLocked = ref(false) // 已存密钥锁定态：编辑时不回显明文，只能重置重填
+
+// 锁定态下测试/保存用的真 key（form.apiKey 是 __locked__ 占位）
+function savedProviderKey(id) {
+  return config.aiProviders.find((p) => p.id === id)?.apiKey || ''
+}
+function formApiKey() {
+  const f = form.value
+  return f.apiKey === '__locked__' ? savedProviderKey(f.id || editingId.value) : (f.apiKey || '')
+}
+
 function newProvider() {
   editingId.value = null
   modelOptions.value = []
   keyDecryptFailed.value = false
+  keyLocked.value = false
   form.value = { id: null, name: '', protocol: 'openai', baseUrl: '', apiKey: '', model: '' }
 }
 function startEditProvider(p) {
   editingId.value = p.id
   modelOptions.value = p.model ? [p.model] : []
-  form.value = { protocol: 'openai', ...p } // 老配置默认 OpenAI 协议
-  // 密钥解密失败：提示重填并清空哨兵值
+  // 密钥解密失败：提示重填并清空哨兵值；正常则锁定不回显
   keyDecryptFailed.value = p.apiKey === '\u0000DECRYPT_FAILED'
-  if (keyDecryptFailed.value) form.value.apiKey = ''
+  keyLocked.value = !!p.apiKey && !keyDecryptFailed.value
+  form.value = { protocol: 'openai', ...p, apiKey: keyLocked.value ? '__locked__' : '' } // 老配置默认 OpenAI 协议
   testResult.value = ''
+}
+function unlockKey() {
+  keyLocked.value = false
+  form.value.apiKey = ''
 }
 async function saveProvider() {
   const f = form.value
@@ -581,7 +630,7 @@ async function saveProvider() {
     alert('名称和请求地址不能为空')
     return
   }
-  if (keyDecryptFailed.value && !f.apiKey) {
+  if (keyDecryptFailed.value && !formApiKey()) {
     alert('原密钥已失效（解密失败），请重新填写 API Key 再保存')
     return
   }
@@ -590,7 +639,7 @@ async function saveProvider() {
     name: f.name.trim(),
     protocol: f.protocol === 'anthropic' ? 'anthropic' : 'openai',
     baseUrl: f.baseUrl.trim(),
-    apiKey: f.apiKey || '',
+    apiKey: formApiKey(),
     model: (f.model || '').trim()
   }
   const idx = config.aiProviders.findIndex((p) => p.id === data.id)
@@ -630,7 +679,7 @@ async function fetchModels() {
   }
   fetchingModels.value = true
   try {
-    const res = await window.api.aiListModels({ protocol: f.protocol === 'anthropic' ? 'anthropic' : 'openai', baseUrl: f.baseUrl, apiKey: f.apiKey })
+    const res = await window.api.aiListModels({ protocol: f.protocol === 'anthropic' ? 'anthropic' : 'openai', baseUrl: f.baseUrl, apiKey: formApiKey() })
     if (res.ok) {
       modelOptions.value = res.models
       if (!res.models.length) alert('该服务未返回模型列表')
@@ -722,5 +771,19 @@ async function fetchModels() {
   background: var(--green-dim);
   border-radius: var(--radius-sm);
   padding: 6px 10px;
+}
+.locked-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.locked-box {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  color: var(--text-faint);
+  background: var(--bg0);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
 }
 </style>

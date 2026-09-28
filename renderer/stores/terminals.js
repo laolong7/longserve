@@ -8,7 +8,8 @@ export const useTerminalStore = defineStore('terminals', {
   state: () => ({
     tabs: [], // { id(connId), instanceId, name, status: connecting|connected|closed, instance快照 }
     activeTabId: null,
-    paneRefs: new Map() // tab 对象引用 -> { term, readScreen }（用对象引用做 key，重连换 id 也不失效）
+    paneRefs: new Map(), // tab 对象引用 -> { term, readScreen }（用对象引用做 key，重连换 id 也不失效）
+    split: null // 并列模式：{ top, bottom } 两个 tab 对象引用上下各占 1/2（存引用不存 id，重连换 id 不失效）
   }),
   getters: {
     activeTab(state) {
@@ -16,6 +17,13 @@ export const useTerminalStore = defineStore('terminals', {
     },
     activePane(state) {
       return state.activeTab ? state.paneRefs.get(state.activeTab) : null
+    },
+    // 并列模式下面板可见性判断（App.vue 用）
+    isPaneVisible(state) {
+      return (tab) =>
+        state.split
+          ? tab === state.split.top || tab === state.split.bottom
+          : tab.id === state.activeTabId
     }
   },
   actions: {
@@ -33,6 +41,25 @@ export const useTerminalStore = defineStore('terminals', {
       })
       this.activeTabId = tempId
       await this.establish(tempId)
+    },
+
+    // 并列：对当前实例开一条新连接，与当前终端上下各占 1/2 高度
+    // 返回 'ok' | 'max'（已并列两个） | 'none'（无当前连接）
+    async openSplit() {
+      if (this.split) return 'max'
+      const cur = this.activeTab
+      if (!cur) return 'none'
+      const count = this.tabs.length
+      await this.openTab(cur.instance)
+      const newTab = this.tabs.length > count ? this.tabs[this.tabs.length - 1] : null
+      if (!newTab) return 'error'
+      this.split = { top: cur, bottom: newTab }
+      this.activeTabId = cur.id // 焦点留在用户正看着的上半格
+      return 'ok'
+    },
+
+    exitSplit() {
+      this.split = null
     },
 
     // 实际建立 SSH 连接（新建与重连共用；接受 tab 对象引用）
@@ -75,6 +102,11 @@ export const useTerminalStore = defineStore('terminals', {
     },
 
     setActive(tabId) {
+      // 并列模式下切到第三个 tab：退出并列，正常全屏显示它
+      if (this.split) {
+        const t = this.tabs.find((x) => x.id === tabId)
+        if (t && t !== this.split.top && t !== this.split.bottom) this.split = null
+      }
       this.activeTabId = tabId
     },
 
@@ -84,6 +116,10 @@ export const useTerminalStore = defineStore('terminals', {
       const tab = this.tabs[idx]
       if (tab.id && tab.id.startsWith('conn_')) {
         await window.api.sshClose(tab.id).catch(() => {})
+      }
+      // 关掉的是并列格之一：退出并列，另一个恢复全屏
+      if (this.split && (tab === this.split.top || tab === this.split.bottom)) {
+        this.split = null
       }
       this.paneRefs.delete(tab)
       this.tabs.splice(idx, 1)

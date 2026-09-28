@@ -108,6 +108,7 @@ function emitJsonOnce(j, emit) {
   // OpenAI 形态：{ choices: [{ message: { content, tool_calls } }] }
   const msg = j && j.choices && j.choices[0] && j.choices[0].message
   if (msg) {
+    if (msg.reasoning_content || msg.reasoning) emit('delta', { reasoning: msg.reasoning_content || msg.reasoning })
     if (msg.content) emit('delta', { content: msg.content })
     if (msg.tool_calls && msg.tool_calls.length) {
       emit('delta', {
@@ -176,6 +177,9 @@ async function chatOpenAI(provider, body, emit, ac, ctx) {
         if (!choice) continue
         const delta = choice.delta || {}
         const piece = {}
+        // 推理模型的思考增量（DeepSeek-R1/o系/Gemini thinking 等）：字段名两家并存
+        const reasoning = delta.reasoning_content || delta.reasoning
+        if (reasoning) piece.reasoning = reasoning
         if (delta.content) piece.content = delta.content
         if (delta.tool_calls && delta.tool_calls.length) {
           piece.toolCalls = delta.tool_calls.map((tc) => ({
@@ -185,7 +189,7 @@ async function chatOpenAI(provider, body, emit, ac, ctx) {
             argsFragment: tc.function && tc.function.arguments
           }))
         }
-        if (piece.content || piece.toolCalls) emit('delta', piece)
+        if (piece.reasoning || piece.content || piece.toolCalls) emit('delta', piece)
       } catch { /* 非 JSON 行（如注释心跳），忽略 */ }
     }
   }
@@ -313,6 +317,9 @@ async function chatAnthropic(provider, body, emit, ac, ctx) {
       } else if (ev.type === 'content_block_delta' && ev.delta) {
         if (ev.delta.type === 'text_delta' && ev.delta.text) {
           emit('delta', { content: ev.delta.text })
+        } else if (ev.delta.type === 'thinking_delta' && ev.delta.thinking) {
+          // Claude 扩展思考块：流式转发给渲染层的"思考过程"
+          emit('delta', { reasoning: ev.delta.thinking })
         } else if (ev.delta.type === 'input_json_delta' && ev.delta.partial_json) {
           emit('delta', { toolCalls: [{ index: ev.index, argsFragment: ev.delta.partial_json }] })
         }

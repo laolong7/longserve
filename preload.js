@@ -74,6 +74,10 @@ contextBridge.exposeInMainWorld('api', {
   dataOpen: () => ipcRenderer.invoke('data:open'),
   dataChange: () => ipcRenderer.invoke('data:change'),
   dataReset: () => ipcRenderer.invoke('data:reset'),
+
+  // ---------- 关于系统 ----------
+  appInfo: () => ipcRenderer.invoke('app:info'),
+  openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
   onWinMaximizeChanged: (cb) => {
     const listener = (_e, v) => cb(v)
     ipcRenderer.on('win:maximized-changed', listener)

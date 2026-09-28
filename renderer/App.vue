@@ -11,12 +11,12 @@
       <!-- 中栏：终端标签 + 终端 -->
       <div class="center-col">
         <TerminalTabs @open-files="openFiles" />
-        <div class="panes" v-if="store.tabs.length">
+        <div class="panes" :class="{ 'split-mode': !!store.split }" v-if="store.tabs.length">
           <TerminalPane
             v-for="tab in store.tabs"
             :key="tab.__uid"
             :tab="tab"
-            :active="tab.id === store.activeTabId"
+            :visible="store.isPaneVisible(tab)"
           />
         </div>
         <div class="panes" v-else>
@@ -32,7 +32,7 @@
 
       <!-- 右栏：AI 副驾 -->
       <div class="right-col" :style="{ width: rightW + 'px' }">
-        <AiChat @open-history="openHistory" />
+        <AiChat @open-history="openHistory" @open-settings="openSettings('ai')" />
       </div>
     </div>
 
@@ -41,6 +41,7 @@
     <SettingsDialog ref="settingsRef" />
     <FileTransferDialog ref="filesRef" />
     <HistoryDialog ref="historyRef" />
+    <AboutDialog ref="aboutRef" />
   </div>
 </template>
 
@@ -55,6 +56,7 @@ import DialogHost from './components/DialogHost.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import FileTransferDialog from './components/FileTransferDialog.vue'
 import HistoryDialog from './components/HistoryDialog.vue'
+import AboutDialog from './components/AboutDialog.vue'
 import { useConfigStore } from './stores/config'
 import { useTerminalStore } from './stores/terminals'
 import { applyAppearance } from './utils/appearance'
@@ -65,18 +67,22 @@ const store = useTerminalStore()
 const settingsRef = ref(null)
 const filesRef = ref(null)
 const historyRef = ref(null)
+const aboutRef = ref(null)
 // action: { type:'new-instance' } | { type:'edit-instance', id } | undefined
 const openSettings = (tabName, action) => settingsRef.value?.open(tabName, action)
 const openFiles = () => filesRef.value?.open()
 const openHistory = () => historyRef.value?.open()
+const openAbout = () => aboutRef.value?.open()
 provide('openSettings', openSettings)
+provide('openAbout', openAbout)
 
 onMounted(async () => {
   await config.init()
-  applyAppearance(config.appearance)
+  // 渲染按"实际生效"的窗口效果走：改效果选"下次打开时应用"时两者短暂不一致
+  applyAppearance(config.appearance, config.runtimeEffect)
 })
 // 外观设置变化即时生效
-watch(() => config.appearance, (a) => applyAppearance(a), { deep: true })
+watch(() => config.appearance, (a) => applyAppearance(a, config.runtimeEffect), { deep: true })
 
 // ---------- 栏宽拖拽 ----------
 const leftW = ref(240)
@@ -134,7 +140,17 @@ function startDrag(side, e) {
   flex: 1;
   min-height: 0;
   position: relative;
+  display: flex;
+  flex-direction: column;
 }
+/* 并列模式：两个终端上下各占 1/2 */
+.panes.split-mode .pane-wrap {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  border-bottom: 1px solid var(--border);
+}
+.panes.split-mode .pane-wrap:last-child { border-bottom: none; }
 .splitter {
   width: 4px;
   cursor: col-resize;

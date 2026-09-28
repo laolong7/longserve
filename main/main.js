@@ -312,6 +312,20 @@ function registerIpc() {
 
   // ---------- 系统 ----------
   // （拖拽文件路径转换在 preload 中用 webUtils 处理，无需主进程参与）
+
+  // ---------- 关于系统 ----------
+  ipcMain.handle('app:info', () => ({
+    version: app.getVersion(),
+    electron: process.versions.electron,
+    node: process.versions.node,
+    platform: process.platform
+  }))
+  // 打开外部链接：仅允许 https，防止渲染层被诱导拉起任意协议
+  ipcMain.handle('shell:open-external', (_e, url) => {
+    if (typeof url !== 'string' || !/^https:\/\/[^\s]+$/.test(url)) return { ok: false, error: '仅允许 https 链接' }
+    shell.openExternal(url)
+    return { ok: true }
+  })
 }
 
 app.whenReady().then(() => {

@@ -8,6 +8,7 @@ export const useConfigStore = defineStore('config', {
     activeAiProviderId: null,
     skills: [],
     appearance: null,
+    runtimeEffect: null, // 当前窗口实际生效的窗口效果（运行时状态，不持久化；改效果选"下次应用"时与 appearance.windowEffect 短暂不一致）
     loaded: false
   }),
   getters: {
@@ -24,6 +25,7 @@ export const useConfigStore = defineStore('config', {
       this.activeAiProviderId = cfg.activeAiProviderId || null
       this.skills = cfg.skills || []
       this.appearance = cfg.appearance || null
+      this.runtimeEffect = this.appearance?.windowEffect || 'none'
       // 自动选中第一个 AI 配置
       if (!this.activeAiProviderId && this.aiProviders.length) {
         this.activeAiProviderId = this.aiProviders[0].id

@@ -46,6 +46,26 @@
       </div>
     </div>
 
+    <!-- 多选一弹窗（自定义按钮组） -->
+    <div v-if="dlg.choiceVisible" class="modal-mask" @click.self="dlg.answerChoice(null)">
+      <div class="modal choice-modal">
+        <div class="confirm-head plain">
+          <span>{{ dlg.choiceTitle }}</span>
+        </div>
+        <div class="confirm-body">
+          <div v-if="dlg.choiceMessage" class="msg-text">{{ dlg.choiceMessage }}</div>
+        </div>
+        <div class="confirm-foot">
+          <button
+            v-for="opt in dlg.choiceOptions"
+            :key="opt.value"
+            :class="opt.kind"
+            @click="dlg.answerChoice(opt.value)"
+          >{{ opt.label }}</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 轻提示 toast -->
     <Transition name="toast">
       <div v-if="dlg.toast" class="toast">{{ dlg.toast }}</div>
@@ -71,6 +91,7 @@ watch(() => dlg.promptVisible, (v) => {
 .modal-mask { z-index: 300; }
 .confirm-modal { width: 460px; }
 .prompt-modal { width: 400px; }
+.choice-modal { width: 440px; }
 .confirm-head {
   display: flex;
   align-items: center;

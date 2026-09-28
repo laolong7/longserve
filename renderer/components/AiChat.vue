@@ -7,9 +7,10 @@
       <select
         class="model-select"
         :value="config.activeAiProviderId || ''"
-        @change="config.activeAiProviderId = $event.target.value; config.save()"
+        @change="onSelectChange"
+        title="选择使用的 AI 配置"
       >
-        <option value="" disabled>选择 AI 配置</option>
+        <option value="__add__">＋ 添加模型…</option>
         <option v-for="p in config.aiProviders" :key="p.id" :value="p.id">
           {{ p.name }}
         </option>
@@ -36,8 +37,19 @@
 
         <!-- AI 消息 -->
         <div v-else class="msg assistant">
-          <div class="assistant-tag">AI</div>
+          <div class="assistant-tag" :title="m.model || 'AI'">{{ m.model || 'AI' }}</div>
           <div class="bubble ai-bubble selectable">
+            <!-- 思考过程：流式展开，完成后默认收起，可点开回看 -->
+            <div v-if="m.reasoning" class="reas" :class="{ open: reasOpen(m) }">
+              <div class="reas-head" @click="toggleReas(m)">
+                <span class="reas-icon">✦</span>
+                <span class="reas-title">思考过程</span>
+                <span v-if="m.status === 'streaming' && !m.content" class="reas-live">流式中</span>
+                <span class="tool-arrow">{{ reasOpen(m) ? '▾' : '▸' }}</span>
+              </div>
+              <div v-show="reasOpen(m)" class="reas-body selectable">{{ m.reasoning }}</div>
+            </div>
+
             <div v-if="m.content" v-html="mdRender(m.content)"></div>
             <span v-if="m.status === 'streaming' && !m.toolCalls.length" class="caret"></span>
 
@@ -60,10 +72,10 @@
               </div>
             </div>
 
-            <!-- 思考中动画：仅在还没吐字时显示 -->
-            <div v-if="ai.running && m.status === 'streaming' && !m.content && !m.toolCalls.length" class="thinking">
+            <!-- 等待首字：紧凑单行指示（模型名可见） -->
+            <div v-if="m.status === 'streaming' && !m.content && !m.reasoning && !m.toolCalls.length" class="thinking">
               <span class="th-dot"></span><span class="th-dot"></span><span class="th-dot"></span>
-              <span class="th-text">思考中</span>
+              <span class="th-text">{{ m.model || 'AI' }} 思考中…</span>
             </div>
           </div>
         </div>
@@ -88,7 +100,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, watch } from 'vue'
+import { ref, reactive, computed, nextTick, watch } from 'vue'
 import { useConfigStore } from '../stores/config'
 import { useAiStore } from '../stores/ai'
 
@@ -100,6 +112,27 @@ const draft = ref('')
 const msgsEl = ref(null)
 const inputEl = ref(null)
 
+// 模型下拉：顶部固定"添加模型"入口，选择它直接打开设置→AI 配置
+function onSelectChange(e) {
+  if (e.target.value === '__add__') {
+    e.target.value = config.activeAiProviderId || '' // 回弹到当前配置，不改变选择
+    emit('open-settings')
+    return
+  }
+  config.activeAiProviderId = e.target.value
+  config.save()
+}
+
+// ---------- 思考过程折叠 ----------
+// 流式中默认展开；完成后没手动动过就收起。用户点击后以手动状态为准
+const reasManual = reactive({})
+function reasOpen(m) {
+  return reasManual[m.id] ?? (m.status === 'streaming')
+}
+function toggleReas(m) {
+  reasManual[m.id] = !reasOpen(m)
+}
+
 const QUICK = [
   '看看这台服务器的基本情况',
   '检查磁盘和内存占用',
@@ -110,7 +143,13 @@ const QUICK = [
 const TOOL_META = {
   run_command: { icon: '$', label: '执行命令' },
   read_terminal: { icon: '👁', label: '读取终端' },
-  sftp_list: { icon: '▤', label: '查看目录' }
+  sftp_list: { icon: '▤', label: '查看目录' },
+  list_local: { icon: '▣', label: '查看本机目录' },
+  read_local_file: { icon: '📄', label: '读取本机文件' },
+  write_local_file: { icon: '✏', label: '写入本机文件' },
+  delete_local: { icon: '🗑', label: '删除本机文件' },
+  download_server_file: { icon: '⬇', label: '下载服务器文件' },
+  use_skill: { icon: '⚡', label: '加载技能' }
 }
 
 function statusText(st) {
@@ -134,7 +173,7 @@ async function send(text) {
   await ai.send(text)
 }
 
-// 自动滚底（仅当用户本就接近底部）
+// 自动滚底（仅当用户本就接近底部）；思考块展开时同步滚其内部到底
 watch(() => ai.messages.length, scrollBottom)
 watch(ai.messages, scrollBottom, { deep: true })
 function scrollBottom() {
@@ -143,6 +182,8 @@ function scrollBottom() {
     if (!el) return
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120
     if (nearBottom) el.scrollTop = el.scrollHeight
+    // 流式思考块跟随滚动（仅当该块处于展开态）
+    el.querySelectorAll('.reas.open .reas-body').forEach((b) => { b.scrollTop = b.scrollHeight })
   })
 }
 
@@ -218,6 +259,12 @@ function mdRender(text) {
   border-radius: 4px;
   padding: 1px 6px;
   margin-bottom: 5px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+  font-family: var(--font-mono);
 }
 .ai-bubble {
   background: var(--bg2);
@@ -252,16 +299,17 @@ function mdRender(text) {
   margin-left: 2px;
 }
 @keyframes blink { 50% { opacity: 0; } }
-/* 思考动画：三个圆点错相位起伏 + 渐隐文字 */
+/* 思考动画：紧凑单行（三点 + 模型名），不占高度 */
 .thinking {
   display: flex;
   align-items: center;
-  gap: 5px;
-  margin-top: 8px;
+  gap: 4px;
+  margin-top: 2px;
+  min-height: 18px;
 }
 .th-dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: var(--violet);
   animation: th-bounce 1.2s ease-in-out infinite;
@@ -270,17 +318,56 @@ function mdRender(text) {
 .th-dot:nth-child(3) { animation-delay: 0.3s; opacity: 0.5; }
 .th-text {
   color: var(--text-faint);
-  font-size: 11.5px;
-  margin-left: 4px;
+  font-size: 11px;
+  margin-left: 3px;
   animation: th-fade 1.6s ease-in-out infinite;
+  font-family: var(--font-mono);
 }
 @keyframes th-bounce {
   0%, 60%, 100% { transform: translateY(0); }
-  30% { transform: translateY(-4px); }
+  30% { transform: translateY(-3px); }
 }
 @keyframes th-fade {
   0%, 100% { opacity: 0.45; }
   50% { opacity: 1; }
+}
+
+/* 思考过程：可折叠灰字块，流式时内部滚动 */
+.reas {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg0);
+  margin-bottom: 7px;
+  overflow: hidden;
+}
+.reas-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.reas-head:hover { color: var(--text); }
+.reas-icon { color: var(--violet); font-size: 10px; }
+.reas-title { font-weight: 600; }
+.reas-live {
+  font-size: 10px;
+  color: var(--violet);
+  animation: th-fade 1.6s ease-in-out infinite;
+}
+.reas-body {
+  max-height: 150px;
+  overflow-y: auto;
+  padding: 6px 9px;
+  font-size: 11.3px;
+  line-height: 1.6;
+  color: var(--text-faint);
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-top: 1px solid var(--border);
 }
 
 /* 工具卡片 */

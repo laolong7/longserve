@@ -74,13 +74,16 @@ function parseAppearance(a) {
 }
 
 // 应用到 CSS 变量
-export function applyAppearance(a) {
+// effectOverride：渲染时实际生效的窗口效果（窗口属性创建后不可热切换，
+// 用户选"下次打开时应用"时配置已保存新值，但渲染继续按旧效果，避免视觉错乱）
+export function applyAppearance(a, effectOverride) {
   const root = document.documentElement
   if (!a) {
     for (const [k, v] of DEFAULTS) root.style.setProperty(k, v)
     return
   }
-  const { accent, text, h, alpha, windowEffect } = parseAppearance(a)
+  const { accent, text, h, alpha } = parseAppearance(a)
+  const windowEffect = effectOverride || parseAppearance(a).windowEffect
 
   // html 底：
   //   none       = 随色相辉光渐变（不透明窗口）
@@ -114,16 +117,17 @@ export function applyAppearance(a) {
 }
 
 // 终端主题片段（xterm 用）：null=默认。
-// 背景/前景优先用独立的 termBg/termFg（外观设置可单独调），留空则跟随全局
+// 背景/前景优先用独立的 termBg/termFg（外观设置可单独调），
+// 留空则跟随全局 —— 用面板同款亮度（11%，即 --bg1），和旁边系统 UI 融为一体而不是一块纯黑
 export function getTermTheme(a) {
   if (!a) return { ...TERM_BASE }
   const { accent, text, h, alpha, termBg, termFg } = parseAppearance(a)
   return {
     ...TERM_BASE,
-    background: termBg ? hexToRgba(termBg, alpha) : `hsla(${h}, 26%, 8%, ${alpha})`,
+    background: termBg ? hexToRgba(termBg, alpha) : `hsla(${h}, 26%, 11%, ${alpha})`,
     foreground: termFg || text,
     cursor: accent,
-    cursorAccent: termBg ? termBg : `hsl(${h}, 26%, 8%)`,
+    cursorAccent: termBg ? termBg : `hsl(${h}, 26%, 11%)`,
     selectionBackground: hexToRgba(accent, 0.3)
   }
 }

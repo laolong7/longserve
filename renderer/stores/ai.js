@@ -267,13 +267,13 @@ export const useAiStore = defineStore('ai', {
       if (this.running || !text.trim()) return
       const config = useConfigStore()
       if (!config.activeProvider) {
-        this.lastError = '请先在右上角 AI 设置中添加并选择一个 AI 配置'
+        this.lastError = '请先在左下角「实例与 AI 设置」中添加并选择一个 AI 配置'
         return
       }
       // 密钥解密失败/为空：直接拦截，不发请求（哨兵值由主进程 store.js 注入）
       const key = config.activeProvider.apiKey || ''
       if (key.includes('DECRYPT_FAILED') || !key.trim()) {
-        this.lastError = 'API Key 解密失败或未填写，请到右上角 AI 设置重新填写 API Key'
+        this.lastError = 'API Key 解密失败或未填写，请到 AI 设置重新填写 API Key'
         return
       }
       // 缓存桌面路径（systemContext 注入用；失败不阻塞对话）
@@ -297,6 +297,8 @@ export const useAiStore = defineStore('ai', {
             id: newMsgId(),
             role: 'assistant',
             content: '',
+            reasoning: '', // 思考过程（推理模型流式输出，不进上下文/历史）
+            model: config.activeProvider.model || '', // 消息标签显示具体模型
             toolCalls: [],
             status: 'streaming'
           }
@@ -345,6 +347,7 @@ export const useAiStore = defineStore('ai', {
 
         const unsubs = [
           window.api.on(`ai:delta:${eventId}`, (piece) => {
+            if (piece.reasoning) msg.reasoning += piece.reasoning
             if (piece.content) msg.content += piece.content
             if (piece.toolCalls) {
               for (const t of piece.toolCalls) {

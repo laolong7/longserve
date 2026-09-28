@@ -5,7 +5,7 @@
       <span class="tb-title">Laolong Server Utilities</span>
     </div>
     <div class="tb-actions">
-      <button class="tb-btn" title="新建窗口（并列显示）" @click="api.winNew()">＋</button>
+      <button class="tb-btn tb-about" title="关于系统" @click="openAbout()">ⓘ</button>
       <button class="tb-btn" title="最小化" @click="api.winMinimize()">─</button>
       <button class="tb-btn" :title="maximized ? '还原' : '最大化'" @click="toggleMax">
         {{ maximized ? '❐' : '▢' }}
@@ -16,9 +16,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, inject, onMounted, onBeforeUnmount } from 'vue'
 
 const api = window.api
+const openAbout = inject('openAbout', () => {})
 const maximized = ref(false)
 let unsub = null
 
@@ -67,6 +68,7 @@ onBeforeUnmount(() => { if (unsub) unsub() })
   border-radius: 0;
 }
 .tb-btn:hover { background: var(--bg3); color: var(--text); }
+.tb-about { font-size: 13px; }
 .tb-close:hover { background: var(--red); color: #fff; }
 </style>
 <style>

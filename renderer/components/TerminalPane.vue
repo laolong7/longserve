@@ -1,5 +1,5 @@
 <template>
-  <div class="pane-wrap" v-show="active">
+  <div class="pane-wrap" v-show="visible" @mousedown="store.setActive(tab.id)">
     <div ref="hostEl" class="term-host"></div>
 
     <!-- 连接中 / 断线覆盖层 -->
@@ -27,7 +27,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -37,7 +37,7 @@ import { getTermTheme } from '../utils/appearance'
 
 const props = defineProps({
   tab: { type: Object, required: true },
-  active: { type: Boolean, default: false }
+  visible: { type: Boolean, default: false } // 全屏模式=是否激活标签；并列模式=是否在并列两格中
 })
 
 const store = useTerminalStore()
@@ -193,13 +193,18 @@ watch(
   { deep: true }
 )
 
-// 切换到该标签时重新适配尺寸（v-show 隐藏期间容器为 0 尺寸）
+// 面板变为可见时重新适配尺寸（v-show 隐藏期间容器为 0 尺寸）
 watch(
-  () => props.active,
+  () => props.visible,
   (a) => {
-    if (a) nextTick(() => { fit(); term && term.focus() })
+    if (a) nextTick(() => { fit() })
   }
 )
+// 激活标签（含并列模式点击某格）：聚焦该终端，键盘输入直达
+const isActive = computed(() => store.activeTabId === props.tab.id)
+watch(isActive, (a) => {
+  if (a && props.visible) nextTick(() => term && term.focus())
+})
 watch(
   () => props.tab.status,
   (st) => {
@@ -221,6 +226,7 @@ onMounted(() => {
     cursorBlink: true,
     scrollback: 5000,
     allowProposedApi: true,
+    allowTransparency: true, // 不开这个 xterm 会把半透明背景强制画成不透明（终端不透明的根因）
     theme: getTermTheme(config.appearance) // 主题由外观系统统一生成（背景吃色相与透明度）
   })
   fitAddon = new FitAddon()

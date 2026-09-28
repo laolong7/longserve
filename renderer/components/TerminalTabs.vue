@@ -24,6 +24,13 @@
         @click="duplicate"
       >⧉ 多开</button>
       <button
+        v-if="store.activeTab"
+        class="ghost"
+        :class="{ on: store.split }"
+        title="与当前终端上下并列一条新连接（最多两个）"
+        @click="splitView"
+      >◫ 并列</button>
+      <button
         v-if="store.activeTab && store.activeTab.status === 'connected'"
         class="ghost"
         title="文件传输（SFTP）"
@@ -35,12 +42,19 @@
 
 <script setup>
 import { useTerminalStore } from '../stores/terminals'
+import { useDialogStore } from '../stores/dialog'
 
 const emit = defineEmits(['open-files'])
 const store = useTerminalStore()
+const dialog = useDialogStore()
 
 function duplicate() {
   if (store.activeTab) store.openTab(store.activeTab.instance)
+}
+async function splitView() {
+  const r = await store.openSplit()
+  if (r === 'max') dialog.showToast('最多只能并列两个终端')
+  else if (r === 'none') dialog.showToast('当前没有终端连接')
 }
 function close(tab) {
   store.closeTab(tab.id)
@@ -102,4 +116,5 @@ function close(tab) {
   border-left: 1px solid var(--border);
 }
 .actions .ghost { font-size: 12px; padding: 4px 9px; }
+.actions .ghost.on { color: var(--green); }
 </style>

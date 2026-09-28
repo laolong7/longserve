@@ -127,7 +127,7 @@ async function main() {
   }
 
   console.log(failures === 0 ? '\n🎉 链路加固测试全部通过' : '\n💥 ' + failures + ' 项失败')
-  process.exit(failures === 0 ? 0 : 1)
+  process.exitCode = failures === 0 ? 0 : 1
 }
 
-main().catch((e) => { console.error('测试异常:', e); process.exit(1) })
+main().catch((e) => { console.error('测试异常:', e); process.exitCode = 1 })
