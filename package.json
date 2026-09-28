@@ -1,0 +1,53 @@
+{
+  "name": "laoji-server-tool",
+  "productName": "牢笼服务器工具",
+  "version": "1.0.0",
+  "description": "带 AI 副驾的服务器终端管理工具",
+  "main": "main/main.js",
+  "author": "牢笼 & 逐光",
+  "license": "MIT",
+  "scripts": {
+    "dev": "concurrently -k -s first \"vite\" \"wait-on tcp:127.0.0.1:5173 && electron .\"",
+    "build:ui": "vite build",
+    "start": "electron .",
+    "dist": "vite build && electron-builder --win"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "5.5.0",
+    "pinia": "^3.0.0",
+    "ssh2": "^1.17.0",
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.0",
+    "concurrently": "^9.0.0",
+    "electron": "44.4.5",
+    "electron-builder": "^26.0.0",
+    "vite": "^7.0.0",
+    "wait-on": "^9.0.0"
+  },
+  "build": {
+    "appId": "com.laoji.servertool",
+    "productName": "牢笼服务器工具",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main/**",
+      "preload.js",
+      "renderer/dist/**"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "unicode": true
+    }
+  }
+}

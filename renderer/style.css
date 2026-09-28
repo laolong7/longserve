@@ -1,0 +1,170 @@
+/* ============================================================
+   牢笼服务器工具 - 全局主题
+   深蓝墨夜色系：机房磷光绿做信号色，AI 区用紫罗兰色相区分
+   IP/路径/状态/命令一律等宽字体 —— 终端工具的正统审美
+   ============================================================ */
+:root {
+  --bg0: #14161b;            /* 最深：终端区 */
+  --bg1: #191c22;            /* 面板 */
+  --bg2: #20242c;            /* 悬浮层/输入框 */
+  --bg3: #282d37;            /* hover */
+  --border: #2c313c;
+  --border-strong: #3a404d;
+
+  --text: #d8dce4;
+  --text-dim: #8a92a2;
+  --text-faint: #5c6474;
+
+  --green: #3fdc97;          /* 在线/成功 */
+  --green-dim: rgba(63, 220, 151, 0.14);
+  --amber: #f2b155;          /* 连接中/警告 */
+  --amber-dim: rgba(242, 177, 85, 0.14);
+  --red: #f2555a;            /* 断线/危险 */
+  --red-dim: rgba(242, 85, 90, 0.14);
+  --blue: #6ea8fe;           /* 选中/链接 */
+  --blue-dim: rgba(110, 168, 254, 0.14);
+  --violet: #a78bfa;         /* AI 区主色 */
+  --violet-dim: rgba(167, 139, 250, 0.12);
+
+  --font-ui: 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', sans-serif;
+  --font-mono: 'Cascadia Mono', 'Consolas', 'Courier New', monospace;
+
+  --radius: 6px;
+  --radius-sm: 4px;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg0);
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- 通用滚动条 ---------- */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #4a5160; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* ---------- 通用控件 ---------- */
+button {
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  color: var(--text);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+button:hover { background: var(--bg3); border-color: var(--border-strong); }
+button:active { transform: translateY(1px); }
+button:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+button.primary {
+  background: var(--green-dim);
+  border-color: rgba(63, 220, 151, 0.4);
+  color: var(--green);
+}
+button.primary:hover { background: rgba(63, 220, 151, 0.22); }
+button.danger {
+  background: var(--red-dim);
+  border-color: rgba(242, 85, 90, 0.4);
+  color: var(--red);
+}
+button.danger:hover { background: rgba(242, 85, 90, 0.22); }
+button.ghost {
+  background: transparent;
+  border-color: transparent;
+}
+button.ghost:hover { background: var(--bg3); border-color: var(--border); }
+
+input, select, textarea {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  outline: none;
+  transition: border-color 0.12s;
+}
+input:focus, select:focus, textarea:focus { border-color: var(--blue); }
+input.mono, textarea.mono { font-family: var(--font-mono); }
+input::placeholder, textarea::placeholder { color: var(--text-faint); }
+
+label { font-size: 12px; color: var(--text-dim); }
+
+/* ---------- 表单行 ---------- */
+.form-row { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+
+/* ---------- 状态灯（签名元素） ---------- */
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-faint);
+}
+.dot.on  { background: var(--green); box-shadow: 0 0 6px rgba(63, 220, 151, 0.7); }
+.dot.mid { background: var(--amber); box-shadow: 0 0 6px rgba(242, 177, 85, 0.7); animation: pulse 1s infinite; }
+.dot.off { background: var(--red); box-shadow: 0 0 6px rgba(242, 85, 90, 0.6); }
+@keyframes pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) {
+  .dot.mid { animation: none; }
+}
+
+/* ---------- 弹窗 ---------- */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 11, 14, 0.6);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal {
+  background: var(--bg1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  max-height: 88vh;
+}
+
+/* ---------- 通用小工具类 ---------- */
+.mono { font-family: var(--font-mono); }
+.dim { color: var(--text-dim); }
+.faint { color: var(--text-faint); }
+.grow { flex: 1; }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 可选中文字本（终端输出、AI 消息） */
+.selectable, .selectable * { user-select: text; }
+
+/* ---------- 空状态 ---------- */
+.empty-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 100%;
+  color: var(--text-faint);
+}
+.empty-hint .big { font-size: 34px; opacity: 0.5; }
