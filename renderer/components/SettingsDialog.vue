@@ -7,6 +7,7 @@
           <div class="set-tab" :class="{ on: tab === 'ai' }" @click="switchTab('ai')">AI 配置</div>
           <div class="set-tab" :class="{ on: tab === 'skills' }" @click="switchTab('skills')">AI 技能</div>
           <div class="set-tab" :class="{ on: tab === 'appearance' }" @click="switchTab('appearance')">外观</div>
+          <div class="set-tab" :class="{ on: tab === 'data' }" @click="switchTab('data')">数据</div>
           <div class="grow"></div>
           <button class="ghost" @click="close">✕</button>
         </div>
@@ -205,8 +206,30 @@
           </div>
         </div>
 
+        <!-- ================= 数据 ================= -->
+        <div v-else-if="tab === 'data'" class="set-body">
+          <div class="form-panel" style="max-width: 560px">
+            <div class="form-row">
+              <label>数据保存位置（配置、服务器密码、AI 密钥、对话历史）</label>
+              <div class="mono" style="word-break:break-all; background:var(--bg2); padding:8px 10px; border-radius:6px; font-size:12px">{{ dataDir }}</div>
+            </div>
+            <div class="form-row">
+              <label>说明</label>
+              <div class="faint" style="font-size:12px; line-height:1.7">
+                数据独立于 exe 保存，删除软件不会丢数据。<br>
+                更换位置会把全部数据（含加密密钥）拷贝到新目录并重启应用；换电脑时拷贝数据文件夹即可迁移。
+              </div>
+            </div>
+            <div class="form-actions">
+              <button @click="openDataDir">打开数据文件夹</button>
+              <button @click="changeDataDir">更改保存位置…</button>
+              <button class="ghost" @click="resetDataDir">恢复默认位置</button>
+            </div>
+          </div>
+        </div>
+
         <!-- ================= AI 配置 ================= -->
-        <div v-else class="set-body">
+        <div v-else-if="tab === 'ai'" class="set-body">
           <div class="side-list">
             <button class="primary" style="width:100%" @click="newProvider">＋ 新增 AI 配置</button>
             <div class="side-items">
@@ -412,6 +435,25 @@ function resetAppearance() {
   if (prevEffect !== 'none') setTimeout(() => window.api.appRelaunch(), 600)
 }
 
+// ---------- 数据目录 ----------
+const dataDir = ref('（读取中…）')
+async function refreshDataDir() {
+  try { dataDir.value = await window.api.dataDir() } catch { dataDir.value = '（获取失败）' }
+}
+async function openDataDir() {
+  await window.api.dataOpen()
+}
+async function changeDataDir() {
+  const r = await window.api.dataChange()
+  if (r.canceled) return
+  if (r.ok) setTimeout(() => window.api.appRelaunch(), 600)
+  else alert('更改失败：' + (r.error || '未知错误'))
+}
+async function resetDataDir() {
+  await window.api.dataReset()
+  setTimeout(() => window.api.appRelaunch(), 600)
+}
+
 // ---------- 技能 ----------
 function newSkill() {
   editingId.value = null
@@ -474,6 +516,7 @@ function switchTab(name) {
   editingId.value = null
   form.value = null
   modelOptions.value = []
+  if (name === 'data') refreshDataDir()
 }
 
 // ---------- 实例 ----------

@@ -12,20 +12,75 @@ let historyFile = null
 let cache = null
 
 function init(app) {
+  applyCustomDataDir(app)
   configFile = path.join(app.getPath('userData'), 'config.json')
   historyFile = path.join(app.getPath('userData'), 'history.json')
   migrateFromLegacyName(app)
 }
 
+// ---------- 数据目录管理（设置→数据） ----------
+// bootstrap 文件固定在 %APPDATA% 下，记录自定义数据目录；没有则用默认 userData
+function bootstrapPath(app) {
+  return path.join(app.getPath('appData'), 'laolong-data-location.txt')
+}
+
+function applyCustomDataDir(app) {
+  try {
+    const bp = bootstrapPath(app)
+    if (!fs.existsSync(bp)) return false
+    const custom = fs.readFileSync(bp, 'utf8').trim()
+    if (!custom || !fs.existsSync(custom)) return false
+    app.setPath('userData', custom)
+    return true
+  } catch { return false }
+}
+
+// 数据目录三件套：config + history + Local State（safeStorage 密钥，缺一不可）
+function copyDataFiles(srcDir, dstDir) {
+  fs.mkdirSync(dstDir, { recursive: true })
+  for (const f of ['config.json', 'history.json', 'Local State']) {
+    const s = path.join(srcDir, f)
+    if (fs.existsSync(s)) fs.copyFileSync(s, path.join(dstDir, f))
+  }
+}
+
+function changeDataDir(app, newDir) {
+  const cur = app.getPath('userData')
+  if (path.resolve(newDir) === path.resolve(cur)) return { ok: false, error: '新目录与当前目录相同' }
+  copyDataFiles(cur, newDir)
+  fs.writeFileSync(bootstrapPath(app), newDir, 'utf8')
+  return { ok: true }
+}
+
+function resetDataDir(app) {
+  const bp = bootstrapPath(app)
+  const custom = fs.existsSync(bp) ? fs.readFileSync(bp, 'utf8').trim() : ''
+  const def = path.join(app.getPath('appData'), 'Laolong Server Utilities')
+  if (custom && fs.existsSync(custom)) copyDataFiles(custom, def)
+  if (fs.existsSync(bp)) fs.unlinkSync(bp)
+  return { ok: true }
+}
+
 // 产品名改为 Laolong Server Utilities 后 userData 目录随之变化，
-// 首次启动时把旧目录（牢笼服务器工具）里的配置与历史搬过来，无缝升级
+// 首次启动时把旧目录（牢笼服务器工具）里的数据搬过来，无缝升级
+// ⚠️ Local State 必须一起搬：safeStorage 的 AES 解密密钥存于其中，
+// 漏搬会导致所有密码/apiKey 解密失败（SSH 连不上、AI 401）
 function migrateFromLegacyName(app) {
   try {
-    if (fs.existsSync(configFile)) return // 新目录已有配置，无需迁移
     const legacyDir = path.join(app.getPath('appData'), '牢笼服务器工具')
+    const newDir = path.dirname(configFile)
+    // Local State 即使 config 已存在也要补搬（修复过一次的历史残留场景）
+    const legacyState = path.join(legacyDir, 'Local State')
+    const newState = path.join(newDir, 'Local State')
+    if (fs.existsSync(legacyState) && !fs.existsSync(newState)) {
+      fs.mkdirSync(newDir, { recursive: true })
+      fs.copyFileSync(legacyState, newState)
+      console.log('[store] 已补搬 safeStorage 密钥文件（Local State）')
+    }
+    if (fs.existsSync(configFile)) return // 配置已有，无需再搬
     const legacyConfig = path.join(legacyDir, 'config.json')
     if (!fs.existsSync(legacyConfig)) return
-    fs.mkdirSync(path.dirname(configFile), { recursive: true })
+    fs.mkdirSync(newDir, { recursive: true })
     fs.copyFileSync(legacyConfig, configFile)
     const legacyHistory = path.join(legacyDir, 'history.json')
     if (fs.existsSync(legacyHistory)) fs.copyFileSync(legacyHistory, historyFile)
@@ -136,4 +191,7 @@ function saveHistory(sessions) {
   fs.writeFileSync(historyFile, JSON.stringify({ sessions }, null, 2), 'utf8')
 }
 
-module.exports = { init, load, save, loadHistory, saveHistory }
+module.exports = {
+  init, load, save, loadHistory, saveHistory,
+  applyCustomDataDir, changeDataDir, resetDataDir
+}

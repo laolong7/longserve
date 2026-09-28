@@ -68,6 +68,12 @@ contextBridge.exposeInMainWorld('api', {
   winNew: () => ipcRenderer.send('win:new'),
   winIsMaximized: () => ipcRenderer.invoke('win:is-maximized'),
   appRelaunch: () => ipcRenderer.send('app:relaunch'),
+
+  // ---------- 数据目录 ----------
+  dataDir: () => ipcRenderer.invoke('data:dir'),
+  dataOpen: () => ipcRenderer.invoke('data:open'),
+  dataChange: () => ipcRenderer.invoke('data:change'),
+  dataReset: () => ipcRenderer.invoke('data:reset'),
   onWinMaximizeChanged: (cb) => {
     const listener = (_e, v) => cb(v)
     ipcRenderer.on('win:maximized-changed', listener)

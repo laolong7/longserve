@@ -2,7 +2,7 @@
 // 牢笼服务器工具 - Electron 主进程入口
 // 职责：窗口创建、IPC 注册、子管理器装配、退出清理
 // ============================================================
-const { app, BrowserWindow, ipcMain } = require('electron')
+const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron')
 const path = require('path')
 const fs = require('fs')
 
@@ -281,6 +281,23 @@ function registerIpc() {
     app.relaunch()
     app.exit(0)
   })
+
+  // ---------- 数据目录（设置→数据） ----------
+  ipcMain.handle('data:dir', () => app.getPath('userData'))
+  ipcMain.handle('data:open', async () => {
+    const err = await shell.openPath(app.getPath('userData'))
+    return { ok: !err, error: err || '' }
+  })
+  ipcMain.handle('data:change', async () => {
+    const r = await dialog.showOpenDialog({
+      title: '选择新的数据保存位置',
+      properties: ['openDirectory', 'createDirectory']
+    })
+    if (r.canceled || !r.filePaths.length) return { ok: false, canceled: true }
+    const res = store.changeDataDir(app, r.filePaths[0])
+    return res
+  })
+  ipcMain.handle('data:reset', () => store.resetDataDir(app))
 
   ipcMain.handle('ai:chat', async (_e, opts) => {
     // opts: { eventId, provider: {baseUrl, apiKey, model}, body: OpenAI 请求体 }
