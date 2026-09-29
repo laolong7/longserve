@@ -39,8 +39,7 @@
               <div class="about-card open-line">
                 <span class="tag">开源项目</span>
                 作者 <b>Laolong</b> · 基于 MIT 协议在 GitHub 开源：
-                <a class="mono" href="#" @click.prevent="openRepo">github.com/laolong7/laolong-server-utilities</a>
-                <span class="faint">（占位链接）</span>
+                <a class="mono" href="#" @click.prevent="openRepo">github.com/laolong7/longserve</a>
               </div>
 
               <!-- 全功能清单 -->
@@ -136,7 +135,7 @@ const visible = ref(false)
 const view = ref('about')
 const info = ref({})
 const bodyEl = ref(null)
-const GITHUB = 'https://github.com/laolong7/laolong-server-utilities' // TODO: 仓库建好后替换为真实地址
+const GITHUB = 'https://github.com/laolong7/longserve' // 项目开源仓库
 
 // ---------- 全功能清单（关于系统） ----------
 const FEATURES = [
