@@ -55,6 +55,31 @@ export const useTerminalStore = defineStore('terminals', {
       await this.establish(tempId)
     },
 
+    // 打开本机终端（命令提示符）。id 前缀 local_，与 conn_ 走不同数据通路
+    async openLocal() {
+      // 已有本地终端则直接聚焦，不重复开
+      const exist = this.tabs.find((t) => t.local)
+      if (exist) {
+        this.activeTabId = exist.id
+        return exist
+      }
+      const res = await window.api.localOpen()
+      if (!res.ok) return null
+      const tab = {
+        __uid: `uid_${Date.now()}_${++uidSeq}`,
+        id: res.shellId,
+        instanceId: 'local',
+        name: '本地电脑',
+        status: 'connected',
+        error: null,
+        local: true,
+        instance: { id: 'local', name: '本地电脑', host: 'localhost', port: 0, username: '本机', password: '' }
+      }
+      this.tabs.push(tab)
+      this.activeTabId = tab.id
+      return tab
+    },
+
     // 并列：把指定服务器的连接与当前终端上下各占 1/2 高度
     // instance 由"并列"按钮的选择器传入（可以是当前服务器也可以是别的服务器）
     // 返回 'ok' | 'max'（已并列两个） | 'none'（无当前连接）
@@ -148,6 +173,9 @@ export const useTerminalStore = defineStore('terminals', {
       const tab = this.tabs[idx]
       if (tab.id && tab.id.startsWith('conn_')) {
         await window.api.sshClose(tab.id).catch(() => {})
+      }
+      if (tab.id && tab.id.startsWith('local_')) {
+        window.api.localKill(tab.id)
       }
       // 关掉的是并列格之一：退出并列，另一个恢复全屏
       if (this.split && (tab === this.split.top || tab === this.split.bottom)) {

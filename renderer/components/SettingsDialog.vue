@@ -7,7 +7,6 @@
           <div class="set-tab" :class="{ on: tab === 'ai' }" @click="switchTab('ai')">AI 配置</div>
           <div class="set-tab" :class="{ on: tab === 'skills' }" @click="switchTab('skills')">AI 技能</div>
           <div class="set-tab" :class="{ on: tab === 'pipelines' }" @click="switchTab('pipelines')">流水线</div>
-          <div class="set-tab" :class="{ on: tab === 'agent' }" @click="switchTab('agent')">手机控制</div>
           <div class="set-tab" :class="{ on: tab === 'appearance' }" @click="switchTab('appearance')">外观</div>
           <div class="set-tab" :class="{ on: tab === 'data' }" @click="switchTab('data')">数据</div>
           <div class="grow"></div>
@@ -190,10 +189,6 @@
           </div>
         </div>
 
-        <!-- ================= 手机控制（Agent 部署与二维码） ================= -->
-        <div v-else-if="tab === 'agent'" style="display:flex; flex:1; min-height:0">
-          <AgentPanel style="display:flex; flex:1; min-height:0" />
-        </div>
 
         <!-- ================= 外观 ================= -->
         <div v-else-if="tab === 'appearance'" class="set-body">
@@ -376,6 +371,88 @@
                 <input type="checkbox" v-model="form.reasoningBack" style="width:auto" />
                 <span>回传思考内容（DeepSeek 思考模式 + 工具调用时必需；个别严格网关不认此字段时报错就关掉）</span>
               </label>
+              <div class="form-row">
+                <label>思考字段名（历史消息回传用，一般保持自动）</label>
+                <select v-model="form.reasoningField">
+                  <option value="auto">自动（reasoning_content，DeepSeek/多数网关）</option>
+                  <option value="thinking">thinking（个别 v4 校验网关）</option>
+                  <option value="both">两个都带（兼容优先）</option>
+                </select>
+              </div>
+
+              <!-- ===== 高级：万能出口，适配任意类型的 AI ===== -->
+              <div class="adv-box">
+                <div class="adv-title" @click="advOpen = !advOpen">
+                  <span>高级参数（适配任意 AI：附加请求体 / 自定义请求头）</span>
+                  <span class="faint">{{ advOpen ? '▾' : '▸' }}</span>
+                </div>
+                <template v-if="advOpen">
+                  <div class="form-row">
+                    <label>附加请求体（JSON，合并进每次请求，可覆盖任意字段）</label>
+                    <textarea
+                      v-model="form.extraBody"
+                      rows="4"
+                      class="mono"
+                      style="resize:vertical; font-size:11.5px"
+                      placeholder='例（DeepSeek 思考模式）：{"thinking":{"type":"enabled"},"reasoning_effort":"high"}'
+                    ></textarea>
+                  </div>
+                  <div class="form-row">
+                    <label>自定义请求头（JSON，网关需要特殊头时用）</label>
+                    <input
+                      v-model="form.extraHeaders"
+                      class="mono"
+                      style="font-size:11.5px"
+                      placeholder='例：{"x-custom-token":"abc"}'
+                    />
+                  </div>
+                  <div class="faint" style="font-size:11px; line-height:1.6; margin-bottom:12px">
+                    DeepSeek 思考模式默认开启无需填；要控制强度可填 {"thinking":{"type":"enabled"},"reasoning_effort":"max"}。
+                    保存时校验 JSON 合法性。
+                  </div>
+                </template>
+              </div>
+              <div class="form-row">
+                <label>思考字段名（历史消息回传用，一般保持自动）</label>
+                <select v-model="form.reasoningField">
+                  <option value="auto">自动（reasoning_content，DeepSeek/多数网关）</option>
+                  <option value="thinking">thinking（个别 v4 校验网关）</option>
+                  <option value="both">两个都带（兼容优先）</option>
+                </select>
+              </div>
+
+              <!-- ===== 高级：万能出口，适配任意类型的 AI ===== -->
+              <div class="adv-box">
+                <div class="adv-title" @click="advOpen = !advOpen">
+                  <span>高级参数（适配任意 AI：附加请求体 / 自定义请求头）</span>
+                  <span class="faint">{{ advOpen ? '▾' : '▸' }}</span>
+                </div>
+                <template v-if="advOpen">
+                  <div class="form-row">
+                    <label>附加请求体（JSON，合并进每次请求，可覆盖任意字段）</label>
+                    <textarea
+                      v-model="form.extraBody"
+                      rows="4"
+                      class="mono"
+                      style="resize:vertical; font-size:11.5px"
+                      placeholder='例（DeepSeek 思考模式）：{"thinking":{"type":"enabled"},"reasoning_effort":"high"}'
+                    ></textarea>
+                  </div>
+                  <div class="form-row">
+                    <label>自定义请求头（JSON，网关需要特殊头时用）</label>
+                    <input
+                      v-model="form.extraHeaders"
+                      class="mono"
+                      style="font-size:11.5px"
+                      placeholder='例：{"x-custom-token":"abc"}'
+                    />
+                  </div>
+                  <div class="faint" style="font-size:11px; line-height:1.6; margin-bottom:12px">
+                    DeepSeek 思考模式默认开启无需填；要控制强度可填 {"thinking":{"type":"enabled"},"reasoning_effort":"max"}。
+                    保存时校验 JSON 合法性。
+                  </div>
+                </template>
+              </div>
 
               <div class="form-actions">
                 <button
@@ -403,7 +480,6 @@ import { ref, reactive, watch, computed, inject } from 'vue'
 import { useConfigStore } from '../stores/config'
 import { useDialogStore } from '../stores/dialog'
 import { APPEARANCE_PRESETS, DEFAULT_APPEARANCE } from '../utils/appearance'
-import AgentPanel from './AgentPanel.vue'
 
 const config = useConfigStore()
 const dialog = useDialogStore()
@@ -416,13 +492,14 @@ const fetchingModels = ref(false)
 const modelOptions = ref([])
 const testingConn = ref(false)
 const testResult = ref('')
+const advOpen = ref(false) // AI 高级参数折叠区
 const testOk = ref(false)
 const keyDecryptFailed = ref(false)
 
 // 测试连接：拉模型列表验证地址+密钥（不消耗对话 token）
 async function testConn() {
   const f = form.value
-  if (!f.baseUrl) return alert('请先填写请求地址')
+  if (!f.baseUrl) return dialog.showToast('请先填写请求地址')
   testingConn.value = true
   testResult.value = ''
   try {
@@ -572,7 +649,7 @@ async function changeDataDir() {
   const r = await window.api.dataChange()
   if (r.canceled) return
   if (r.ok) setTimeout(() => window.api.appRelaunch(), 600)
-  else alert('更改失败：' + (r.error || '未知错误'))
+  else dialog.showToast('更改失败：' + (r.error || '未知错误'))
 }
 async function resetDataDir() {
   await window.api.dataReset()
@@ -606,9 +683,9 @@ function moveStep(i, dir) {
 }
 async function savePipeline() {
   const f = form.value
-  if (!f.name || !f.name.trim()) return alert('流水线名称不能为空')
+  if (!f.name || !f.name.trim()) return dialog.showToast('流水线名称不能为空')
   const steps = f.steps.filter((s) => s.skillId)
-  if (!steps.length) return alert('至少添加一个步骤并选择技能')
+  if (!steps.length) return dialog.showToast('至少添加一个步骤并选择技能')
   const data = {
     id: f.id || config.newPipelineId(),
     name: f.name.trim(),
@@ -634,7 +711,7 @@ async function removePipelineCurrent() {
 async function saveSkill() {
   const f = form.value
   if (!f.name || !f.content) {
-    alert('技能名称和内容不能为空')
+    dialog.showToast('技能名称和内容不能为空')
     return
   }
   const data = {
@@ -717,7 +794,7 @@ function unlockPassword() {
 async function saveInstance() {
   const f = form.value
   if (!f.name || !f.host) {
-    alert('名称和 IP 地址不能为空')
+    dialog.showToast('名称和 IP 地址不能为空')
     return
   }
   const data = {
@@ -763,7 +840,7 @@ function newProvider() {
   modelOptions.value = []
   keyDecryptFailed.value = false
   keyLocked.value = false
-  form.value = { id: null, name: '', protocol: 'openai', baseUrl: '', apiKey: '', model: '', reasoningBack: true }
+  form.value = { id: null, name: '', protocol: 'openai', baseUrl: '', apiKey: '', model: '', reasoningBack: true, reasoningField: 'auto', extraBody: '', extraHeaders: '' }
 }
 function startEditProvider(p) {
   editingId.value = p.id
@@ -771,7 +848,7 @@ function startEditProvider(p) {
   // 密钥解密失败：提示重填并清空哨兵值；正常则锁定不回显
   keyDecryptFailed.value = p.apiKey === '\u0000DECRYPT_FAILED'
   keyLocked.value = !!p.apiKey && !keyDecryptFailed.value
-  form.value = { protocol: 'openai', ...p, apiKey: keyLocked.value ? '__locked__' : '' } // 老配置默认 OpenAI 协议
+  form.value = { protocol: 'openai', reasoningField: 'auto', extraBody: '', extraHeaders: '', ...p, apiKey: keyLocked.value ? '__locked__' : '' } // 老配置默认 OpenAI 协议
   testResult.value = ''
 }
 function unlockKey() {
@@ -781,12 +858,25 @@ function unlockKey() {
 async function saveProvider() {
   const f = form.value
   if (!f.name || !f.baseUrl) {
-    alert('名称和请求地址不能为空')
+    dialog.showToast('名称和请求地址不能为空')
     return
   }
   if (keyDecryptFailed.value && !formApiKey()) {
-    alert('原密钥已失效（解密失败），请重新填写 API Key 再保存')
+    dialog.showToast('原密钥已失效（解密失败），请重新填写 API Key 再保存')
     return
+  }
+  // 高级参数 JSON 合法性校验（写错当场拦住，不留到请求时才炸）
+  const extraBody = (f.extraBody || '').trim()
+  const extraHeaders = (f.extraHeaders || '').trim()
+  for (const [label, raw] of [['附加请求体', extraBody], ['自定义请求头', extraHeaders]]) {
+    if (!raw) continue
+    try {
+      const j = JSON.parse(raw)
+      if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('必须是 JSON 对象')
+    } catch (e) {
+      dialog.showToast(`${label} 不是合法的 JSON 对象：${e.message}`)
+      return
+    }
   }
   const data = {
     id: f.id || config.newProviderId(),
@@ -795,7 +885,10 @@ async function saveProvider() {
     baseUrl: f.baseUrl.trim(),
     apiKey: formApiKey(),
     model: (f.model || '').trim(),
-    reasoningBack: f.reasoningBack !== false // 老配置/未勾选视为开启，DeepSeek 思考模式必需
+    reasoningBack: f.reasoningBack !== false, // 老配置/未勾选视为开启，DeepSeek 思考模式必需
+    reasoningField: f.reasoningField || 'auto',
+    extraBody,
+    extraHeaders
   }
   const idx = config.aiProviders.findIndex((p) => p.id === data.id)
   if (idx >= 0) config.aiProviders[idx] = data
@@ -832,7 +925,7 @@ function setActive() {
 async function fetchModels() {
   const f = form.value
   if (!f.baseUrl) {
-    alert('请先填写请求地址')
+    dialog.showToast('请先填写请求地址')
     return
   }
   fetchingModels.value = true
@@ -840,12 +933,12 @@ async function fetchModels() {
     const res = await window.api.aiListModels({ protocol: f.protocol === 'anthropic' ? 'anthropic' : 'openai', baseUrl: f.baseUrl, apiKey: formApiKey() })
     if (res.ok) {
       modelOptions.value = res.models
-      if (!res.models.length) alert('该服务未返回模型列表')
+      if (!res.models.length) dialog.showToast('该服务未返回模型列表')
     } else {
-      alert('获取失败：' + res.error)
+      dialog.showToast('获取失败：' + res.error)
     }
   } catch (err) {
-    alert('获取失败：' + err.message)
+    dialog.showToast('获取失败：' + err.message)
   } finally {
     fetchingModels.value = false
   }
@@ -951,6 +1044,26 @@ async function fetchModels() {
   line-height: 1.5;
 }
 .reasoning-ck input { margin-top: 2px; }
+
+/* AI 高级参数折叠区 */
+.adv-box {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 14px;
+  overflow: hidden;
+}
+.adv-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.adv-title:hover { color: var(--text); background: var(--bg2); }
+.adv-box .form-row { padding: 0 12px; margin-top: 10px; }
 .locked-box {
   flex: 1;
   padding: 6px 10px;

@@ -6,7 +6,7 @@
 // 运行：node test/test-reasoning-back.mjs
 // ============================================================
 import http from 'http'
-import { buildOpenAiMessages, REASONING_ERR_RE } from '../renderer/utils/aictx.mjs'
+import { buildOpenAiMessages, REASONING_ERR_RE, REASONING_REJECT_RE, REASONING_MISSING_RE } from '../renderer/utils/aictx.mjs'
 
 let passed = 0
 let failed = 0
@@ -35,7 +35,7 @@ const history = [
   ok(out[1].role === 'user' && out[1].content === '看下磁盘', 'user 消息原样')
   const a1 = out[2]
   ok(a1.role === 'assistant' && a1.reasoning_content === '用户想看磁盘，我应该先跑 df -h', 'assistant 思考内容已回传（reasoning_content）')
-  ok(a1.thinking === a1.reasoning_content, '思考内容同时以 thinking 字段回传（DeepSeek v4 校验字段）')
+  ok(!('thinking' in a1), '默认 auto 只带 reasoning_content（不再多发 thinking 字段）')
   ok(a1.tool_calls?.[0]?.function?.name === 'run_command', 'tool_calls 保留')
   ok(out[3].role === 'tool' && out[3].tool_call_id === 'call_1', '工具结果消息紧随其后')
   const a2 = out[4]
@@ -54,9 +54,17 @@ const history = [
 }
 
 {
-  // 空思考不产生字段
+  // 空思考也带空串字段（根治 DeepSeek "must be passed back"：字段必须在，值可空）
   const out = buildOpenAiMessages([{ role: 'assistant', content: 'hi', reasoning: '' }], 's', {})
-  ok(!('reasoning_content' in out[1]), '空思考内容不加字段')
+  ok(out[1].reasoning_content === '', '空思考内容回传空串字段（字段不缺席）')
+}
+
+{
+  // 字段名可配置：both 双字段 / thinking 单字段
+  const both = buildOpenAiMessages([{ role: 'assistant', content: 'hi', reasoning: '想' }], 's', { reasoningField: 'both' })
+  ok(both[1].reasoning_content === '想' && both[1].thinking === '想', 'both 模式双字段回传')
+  const th = buildOpenAiMessages([{ role: 'assistant', content: 'hi', reasoning: '想' }], 's', { reasoningField: 'thinking' })
+  ok(th[1].thinking === '想' && !('reasoning_content' in th[1]), 'thinking 模式只带 thinking 字段')
 }
 
 {
@@ -68,11 +76,16 @@ const history = [
   ok(out2[1].content === null && out2[1].tool_calls.length === 1, '工具轮次正文 null 合法')
 }
 
-console.log('报错识别正则')
+console.log('报错识别正则（两类方向相反：缺字段 vs 拒字段）')
 {
-  ok(REASONING_ERR_RE.test('content[].thinking in the thinking mode must be passed back to the API'), 'DeepSeek 原文报错命中')
-  ok(REASONING_ERR_RE.test('Unrecognized request argument supplied: reasoning_content'), 'OpenAI 严格校验报错命中')
+  ok(REASONING_ERR_RE.test('content[].thinking in the thinking mode must be passed back to the API'), 'DeepSeek 原文报错命中（兼容旧引用）')
+  ok(REASONING_ERR_RE.test('Unrecognized request argument supplied: reasoning_content'), 'OpenAI 严格校验报错命中（兼容旧引用）')
   ok(!REASONING_ERR_RE.test('认证失败：用户名或密码错误'), '无关报错不命中')
+  // 分流：缺字段类归 MISSING（绝不能剥字段重试），拒字段类归 REJECT（剥字段重试）
+  ok(REASONING_MISSING_RE.test("The 'reasoning_content' in the thinking mode must be passed back to the API. (request_id: abc)"), 'DeepSeek 真实报错归入 MISSING')
+  ok(!REASONING_REJECT_RE.test("The 'reasoning_content' in the thinking mode must be passed back to the API. (request_id: abc)"), 'DeepSeek 真实报错不归 REJECT（方向反了会越修越错）')
+  ok(REASONING_REJECT_RE.test('Unrecognized request argument supplied: reasoning_content'), '严格网关拒字段归 REJECT')
+  ok(!REASONING_MISSING_RE.test('Unrecognized request argument supplied: reasoning_content'), '严格网关拒字段不归 MISSING')
 }
 
 // ---- 集成：ai-proxy 把 reasoning_content 原样转发到服务器 ----

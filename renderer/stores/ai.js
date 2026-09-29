@@ -13,7 +13,7 @@ import { useTerminalStore } from './terminals'
 import { useDialogStore } from './dialog'
 import { checkDanger } from '../utils/danger'
 import { splitCmds } from '../utils/cmds.mjs'
-import { buildOpenAiMessages, REASONING_ERR_RE } from '../utils/aictx.mjs'
+import { buildOpenAiMessages, REASONING_REJECT_RE, REASONING_MISSING_RE } from '../utils/aictx.mjs'
 
 // ---------- 工具定义（OpenAI tools 格式） ----------
 const TOOLS = [
@@ -204,6 +204,14 @@ const SYSTEM_PROMPT = `你是牢笼的服务器管理 AI 副驾，运行在一�
 
 // 自然语言→命令模式（不走工具、不进历史上下文）
 // 输出若干条纯指令（按执行顺序），不是一条命令，也不是带解释的方案
+// 本机终端版本：输出 Windows 命令提示符指令
+const CMD_SYSTEM_WIN = `你是 Windows 命令提示符（cmd）指令转换器。把用户的自然语言需求转化成若干条纯 cmd 指令（按执行顺序排列）。
+规则：
+1. 只输出指令本身：每条指令一行，放在一个代码块里，不写任何解释、序号或多余文字
+2. 需求简单就给 1 条；复杂需求拆成多条（如先查看再操作）
+3. 指令面向 Windows cmd（路径用反斜杠；可用 dir/cd/type/copy/xcopy/robocopy/netstat/tasklist 等）
+4. 尽量安全：优先查看类指令；涉及修改/删除时保持最小影响面`
+
 const CMD_SYSTEM = `你是 Linux 指令转换器。把用户的自然语言需求转化成若干条纯 Linux 指令（按执行顺序排列）。
 规则：
 1. 只输出指令本身：每条指令一行，放在一个代码块里，不写任何解释、序号或多余文字
@@ -365,7 +373,10 @@ export const useAiStore = defineStore('ai', {
       try {
         const res = await this.streamOnce(config.activeProvider, msg, {
           messages: [
-            { role: 'system', content: CMD_SYSTEM },
+            {
+              role: 'system',
+              content: useTerminalStore().activeTab && useTerminalStore().activeTab.local ? CMD_SYSTEM_WIN : CMD_SYSTEM
+            },
             { role: 'user', content: text.trim() }
           ],
           tools: null
@@ -551,19 +562,24 @@ export const useAiStore = defineStore('ai', {
       }
     },
 
-    // 外层包装：网关明确拒绝 reasoning_content 字段时（个别严格校验的中转），
-    // 自动去掉思考回传重试一次，把"配置问题"变成无感降级
+    // 外层包装：按报错类型分诊重试（两类方向相反，绝不能混）：
+    //   网关拒绝思考字段（多余/不认）→ 剥掉字段无感降级重试一次
+    //   网关要求思考回传（字段缺失）→ 绝不能剥字段（越剥越错），直接给明确提示
     async streamOnce(provider, msg, overrides = {}) {
       const res = await this.rawStreamOnce(provider, msg, overrides)
-      if (
-        res.error &&
-        overrides.forceNoReasoning !== true &&
-        provider.reasoningBack !== false &&
-        REASONING_ERR_RE.test(res.error)
-      ) {
+      if (!res.error || overrides.forceNoReasoning === true) return res
+      if (provider.reasoningBack !== false && REASONING_REJECT_RE.test(res.error)) {
         const retry = await this.rawStreamOnce(provider, msg, { ...overrides, forceNoReasoning: true })
         if (!retry.error) retry.degraded = true
         return retry
+      }
+      if (REASONING_MISSING_RE.test(res.error)) {
+        return {
+          error:
+            res.error +
+            '\n（提示：DeepSeek 思考模式要求历史里每条 AI 消息都带思考内容。' +
+            '本会话历史已自动补全空思考字段；若仍报错请新开会话再试）'
+        }
       }
       return res
     },
@@ -624,7 +640,7 @@ export const useAiStore = defineStore('ai', {
           // 降级重试时剥掉所有 assistant 消息的思考回传字段（reasoning_content/thinking）
           messages: overrides.forceNoReasoning
             ? baseMessages.map((m) => {
-                if (m.role !== 'assistant' || (!m.reasoning_content && !m.thinking)) return m
+                if (m.role !== 'assistant' || (!('reasoning_content' in m) && !('thinking' in m))) return m
                 const { reasoning_content, thinking, ...rest } = m
                 return rest
               })
@@ -633,6 +649,12 @@ export const useAiStore = defineStore('ai', {
         }
         // tools: null 表示本轮禁用工具（命令模式）；默认带全量工具
         if (overrides.tools !== null) body.tools = TOOLS
+        // 附加请求体（AI 配置·高级）：原样并入，可覆盖任意字段
+        // （DeepSeek 思考参数 {"thinking":{"type":"enabled"},"reasoning_effort":"high"} 等）
+        try {
+          const extra = provider.extraBody ? JSON.parse(provider.extraBody) : null
+          if (extra && typeof extra === 'object') Object.assign(body, extra)
+        } catch { /* 配置写错不阻塞请求，AI 设置里保存时已校验 */ }
 
         window.api
           .aiChat({ eventId, provider: JSON.parse(JSON.stringify(provider)), body })
@@ -646,8 +668,11 @@ export const useAiStore = defineStore('ai', {
     toOpenAiMessages() {
       const config = useConfigStore()
       // reasoningBack：AI 配置级开关（默认开启），DeepSeek 思考模式+工具调用必需
-      const reasoningBack = config.activeProvider?.reasoningBack !== false
-      return buildOpenAiMessages(this.messages.slice(-40), this.systemContext(), { reasoningBack })
+      const provider = config.activeProvider || {}
+      return buildOpenAiMessages(this.messages.slice(-40), this.systemContext(), {
+        reasoningBack: provider.reasoningBack !== false,
+        reasoningField: provider.reasoningField || 'auto'
+      })
     },
 
     systemContext() {
@@ -656,7 +681,11 @@ export const useAiStore = defineStore('ai', {
       const tab = terminals.activeTab
       let ctx = SYSTEM_PROMPT
 
-      if (tab) {
+      if (tab && tab.local) {
+        ctx += '\n\n当前终端是【本机（用户自己的 Windows 电脑）】的命令提示符。' +
+          '\n\nrun_command 的命令直接作用于本机，你可以操控本机上的任何文件与程序（路径用反斜杠）。' +
+          'read_terminal 读到的就是本机命令提示符的屏幕。'
+      } else if (tab) {
         ctx += `\n\n当前连接的服务器：${tab.name}（${tab.instance.username}@${tab.instance.host}:${tab.instance.port}），状态：${tab.status === 'connected' ? '已连接' : '未连接'}`
       } else {
         ctx += '\n\n当前没有连接任何服务器。本机操作类工具（list_local 等）不依赖服务器连接。'
@@ -696,7 +725,7 @@ export const useAiStore = defineStore('ai', {
         }
         if (tc.name === 'sftp_list') {
           const tab = terminals.activeTab
-          if (!tab || tab.status !== 'connected') return '[错误] 当前没有已连接的服务器'
+          if (!tab || tab.local || tab.status !== 'connected') return '[错误] 当前没有已连接的服务器'
           const res = await window.api.sftpList(tab.id, args.path || '/')
           if (!res.ok) return '[错误] ' + res.error
           if (!res.entries.length) return '（目录为空）'
@@ -758,7 +787,7 @@ export const useAiStore = defineStore('ai', {
         }
         if (tc.name === 'download_server_file') {
           const tab = terminals.activeTab
-          if (!tab || tab.status !== 'connected') return '[错误] 当前没有已连接的服务器，无法下载'
+          if (!tab || tab.local || tab.status !== 'connected') return '[错误] 当前没有已连接的服务器，无法下载'
           const ok = await dialog.askConfirm({
             title: 'AI 请求下载服务器文件到本机',
             message: `服务器：${tab.name}\n远程：${args.remotePath}\n保存到：${args.localPath}`
@@ -780,7 +809,7 @@ export const useAiStore = defineStore('ai', {
         // ---- 快照类（改配置前的安全网） ----
         if (tc.name === 'backup_file') {
           const tab = terminals.activeTab
-          if (!tab || tab.status !== 'connected') return '[错误] 当前没有已连接的服务器，无法备份'
+          if (!tab || tab.local || tab.status !== 'connected') return '[错误] 当前没有已连接的服务器，无法备份'
           const p = String(args.path || '').trim()
           if (!p) return '[错误] 缺少文件路径'
           const bak = `${p}.laoji-bak-${Date.now()}`
@@ -791,7 +820,7 @@ export const useAiStore = defineStore('ai', {
         }
         if (tc.name === 'restore_file') {
           const tab = terminals.activeTab
-          if (!tab || tab.status !== 'connected') return '[错误] 当前没有已连接的服务器，无法还原'
+          if (!tab || tab.local || tab.status !== 'connected') return '[错误] 当前没有已连接的服务器，无法还原'
           const bak = String(args.backupPath || '').trim()
           const to = String(args.restoreTo || '').trim()
           if (!bak || !to) return '[错误] 缺少备份路径或还原目标路径'

@@ -136,7 +136,11 @@ class AgentDeployer {
         baseUrl: aiProvider.baseUrl || '',
         apiKey: aiProvider.apiKey || '',
         model: aiProvider.model || '',
-        reasoningBack: aiProvider.reasoningBack !== false
+        reasoningBack: aiProvider.reasoningBack !== false,
+        // 高级出口：思考字段名 / 附加请求体 / 自定义请求头（支持所有类型 AI）
+        reasoningField: aiProvider.reasoningField || 'auto',
+        extraBody: aiProvider.extraBody || '',
+        extraHeaders: aiProvider.extraHeaders || ''
       },
       createdAt: existing && existing.createdAt ? existing.createdAt : Date.now(),
       updatedAt: Date.now()

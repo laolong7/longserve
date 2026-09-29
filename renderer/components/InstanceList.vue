@@ -6,6 +6,19 @@
     </div>
 
     <div class="items">
+      <!-- 本地电脑：本机命令提示符终端（固定置顶） -->
+      <div
+        class="item local-item"
+        :class="{ live: localLive }"
+        @dblclick="openLocal"
+        title="双击打开本机命令提示符"
+      >
+        <span class="dot" :class="localLive ? 'on' : ''"></span>
+        <div class="item-text">
+          <div class="name ellipsis">本地电脑</div>
+          <div class="addr mono ellipsis">本机命令提示符</div>
+        </div>
+      </div>
       <div
         v-for="inst in config.instances"
         :key="inst.id"
@@ -44,7 +57,7 @@
 </template>
 
 <script setup>
-import { reactive, inject } from 'vue'
+import { reactive, ref, computed, inject } from 'vue'
 import { useConfigStore } from '../stores/config'
 import { useTerminalStore } from '../stores/terminals'
 import { useDialogStore } from '../stores/dialog'
@@ -56,6 +69,12 @@ const store = useTerminalStore()
 const dialog = useDialogStore()
 
 const menu = reactive({ visible: false, x: 0, y: 0, inst: null })
+
+// 本地电脑：双击开本机终端；已有本地终端时状态灯常亮
+const localLive = computed(() => store.tabs.some((t) => t.local && t.status === 'connected'))
+function openLocal() {
+  store.openLocal()
+}
 
 function isLive(instanceId) {
   return store.tabs.some((t) => t.instanceId === instanceId && t.status === 'connected')

@@ -5,7 +5,7 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
 // 允许订阅的事件通道白名单（前缀匹配）
-const EVENT_PREFIXES = ['term:data:', 'term:close:', 'conn:stage:', 'sftp:progress:', 'ai:delta:', 'ai:done:', 'ai:error:', 'log:data:', 'log:close:', 'conn:quality:', 'tunnel:stopped', 'agent:step:']
+const EVENT_PREFIXES = ['term:data:', 'term:close:', 'conn:stage:', 'sftp:progress:', 'ai:delta:', 'ai:done:', 'ai:error:', 'log:data:', 'log:close:', 'conn:quality:', 'tunnel:stopped', 'agent:step:', 'local:data:', 'local:close:']
 
 function isAllowedChannel(ch) {
   return EVENT_PREFIXES.some((p) => ch.startsWith(p))
@@ -26,6 +26,11 @@ contextBridge.exposeInMainWorld('api', {
   sshWrite: (connId, data) => ipcRenderer.send('ssh:write', connId, data),
   sshResize: (connId, rows, cols) => ipcRenderer.send('ssh:resize', connId, rows, cols),
   sshClose: (connId) => ipcRenderer.invoke('ssh:close', connId),
+  // ---------- 本地 Shell（本机命令提示符） ----------
+  localOpen: () => ipcRenderer.invoke('local:open'),
+  localAttach: (shellId) => ipcRenderer.invoke('local:attach', shellId),
+  localWrite: (shellId, data) => ipcRenderer.send('local:write', shellId, data),
+  localKill: (shellId) => ipcRenderer.send('local:kill', shellId),
   sshReconnect: (connId, instance) => ipcRenderer.invoke('ssh:reconnect', connId, instance),
   sshExec: (connId, cmd, timeout) => ipcRenderer.invoke('ssh:exec', connId, cmd, timeout),
 

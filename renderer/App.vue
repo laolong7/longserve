@@ -41,6 +41,7 @@
 
     <!-- 全局弹窗 -->
     <DialogHost />
+    <AgentPage ref="agentPageRef" />
     <SettingsDialog ref="settingsRef" />
     <FileTransferDialog ref="filesRef" />
     <HistoryDialog ref="historyRef" />
@@ -61,6 +62,7 @@ import TerminalTabs from './components/TerminalTabs.vue'
 import TerminalPane from './components/TerminalPane.vue'
 import AiChat from './components/AiChat.vue'
 import DialogHost from './components/DialogHost.vue'
+import AgentPage from './components/AgentPage.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import FileTransferDialog from './components/FileTransferDialog.vue'
 import HistoryDialog from './components/HistoryDialog.vue'
@@ -76,6 +78,7 @@ const config = useConfigStore()
 const store = useTerminalStore()
 
 const settingsRef = ref(null)
+const agentPageRef = ref(null)
 const filesRef = ref(null)
 const historyRef = ref(null)
 const aboutRef = ref(null)
@@ -88,7 +91,7 @@ const openFiles = () => filesRef.value?.open()
 const openHistory = () => historyRef.value?.open()
 const openAbout = () => aboutRef.value?.open('about')
 const openGuide = () => aboutRef.value?.open('guide')
-const openAgent = () => openSettings('agent') // 标题栏 📱 手机控制入口
+const openAgent = () => agentPageRef.value?.open() // 标题栏 📱 手机控制：独立子页面（非设置弹窗）
 const openTunnels = () => tunnelsRef.value?.open(store.activeTab)
 const openLogs = () => logsRef.value?.open()
 const openCast = () => castRef.value?.open()
@@ -100,6 +103,8 @@ provide('openCast', openCast)
 
 onMounted(async () => {
   await config.init()
+  // 没连接服务器时，中间终端默认连本机命令提示符（也可左侧双击「本地电脑」再开）
+  if (!store.tabs.length) store.openLocal()
   // 渲染按"实际生效"的窗口效果走：改效果选"下次打开时应用"时两者短暂不一致
   applyAppearance(config.appearance, config.runtimeEffect)
 })

@@ -111,7 +111,7 @@ function migrateFromLegacyName(app) {
 function defaults() {
   return {
     instances: [],          // { id, name, host, port, username, password }
-    aiProviders: [],        // { id, name, baseUrl, apiKey, model, reasoningBack }
+    aiProviders: [],        // { id, name, protocol, baseUrl, apiKey, model, reasoningBack, reasoningField, extraBody, extraHeaders }
     activeAiProviderId: null,
     skills: [],             // { id, name, description, content, enabled }
     pipelines: [],          // { id, name, steps: [{ skillId, checkpoint }] } 技能流水线

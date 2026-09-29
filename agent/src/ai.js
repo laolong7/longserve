@@ -292,6 +292,7 @@ async function anthropicStream(ai, messages, handlers, signal) {
 
 // ---------- OpenAI 兼容流式请求 ----------
 // onDelta/onReasoning 增量回调；onToolCall 增量聚合（index/id/name/argsFragment）
+// extraBody/extraHeaders：AI 配置的高级出口（DeepSeek thinking 参数、特殊网关头等）
 async function openaiStream(ai, messages, handlers, signal) {
   let url = (ai.baseUrl || '').trim().replace(/\/+$/, '')
   if (!url) throw new Error('AI 配置缺少请求地址（baseUrl）')
@@ -299,10 +300,21 @@ async function openaiStream(ai, messages, handlers, signal) {
     url = /\/v\d+(beta)?$/.test(url) ? url + '/chat/completions' : url + '/v1/chat/completions'
   }
 
+  const payload = { model: ai.model, stream: true, messages, tools: TOOLS, temperature: 0.4 }
+  try {
+    const b = ai.extraBody ? JSON.parse(ai.extraBody) : null
+    if (b && typeof b === 'object') Object.assign(payload, b)
+  } catch { /* 配置写错不阻塞请求 */ }
+  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${ai.apiKey || ''}` }
+  try {
+    const h = ai.extraHeaders ? JSON.parse(ai.extraHeaders) : null
+    if (h && typeof h === 'object') Object.assign(headers, h)
+  } catch { /* 同上 */ }
+
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ai.apiKey || ''}` },
-    body: JSON.stringify({ model: ai.model, stream: true, messages, tools: TOOLS, temperature: 0.4 }),
+    headers,
+    body: JSON.stringify(payload),
     signal
   })
   if (!res.ok) {
@@ -415,11 +427,18 @@ async function runChat(text, emit, signal) {
       else await openaiStream(ai, messages, handlers, signal)
 
       // 组装 assistant 消息：思考内容必须随消息保存并回传（DeepSeek 强制要求）。
-      // 同时携带 reasoning_content 与 thinking 两种字段名，兼容不同网关/模型版本的校验
+      // 关键：携带 tools 的请求里【每条】assistant 消息都要带 reasoning_content 字段
+      // （无思考回传空串），缺字段必 400 "must be passed back"。
+      // thinking 字段按配置携带（个别网关校验用；默认只带 reasoning_content）
       const assistant = { role: 'assistant', content: content || null }
-      if (reasoning) {
-        assistant.reasoning_content = reasoning
-        assistant.thinking = reasoning
+      const fieldMode = ai.reasoningField || 'auto'
+      if (ai.reasoningBack !== false) {
+        if (fieldMode === 'reasoning_content' || fieldMode === 'auto' || fieldMode === 'both') {
+          assistant.reasoning_content = reasoning || ''
+        }
+        if (fieldMode === 'thinking' || fieldMode === 'both') {
+          assistant.thinking = reasoning || ''
+        }
       }
       const calls = pendingCalls.filter(Boolean).map((c, i) => ({
         id: c.id || `call_${Date.now()}_${i}`,

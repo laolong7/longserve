@@ -8,12 +8,14 @@ const fs = require('fs')
 
 const store = require('./store')
 const SshManager = require('./ssh-manager')
+const { LocalShellManager } = require('./local-shell')
 const SftpManager = require('./sftp-manager')
 const aiProxy = require('./ai-proxy')
 const { AgentDeployer, agentBinaryPath } = require('./agent-deployer')
 const { diagnoseDeploy } = require('./agent-diagnose')
 
 let sshManager = null
+let localShell = null
 let sftpManager = null
 let agentDeployer = null
 
@@ -139,6 +141,16 @@ function registerIpc() {
   ipcMain.on('ssh:write', (_e, connId, data) => sshManager.write(connId, data))
   ipcMain.on('ssh:resize', (_e, connId, rows, cols) => sshManager.resize(connId, rows, cols))
   ipcMain.handle('ssh:close', (_e, connId) => sshManager.close(connId))
+  // ---------- 本地 Shell（本机命令提示符，xterm 直连） ----------
+  ipcMain.handle('local:open', async () => {
+    try { return { ok: true, ...(await localShell.open()) } }
+    catch (err) { return { ok: false, error: err.message } }
+  })
+  ipcMain.handle('local:attach', (_e, shellId) => localShell.attach(shellId))
+  ipcMain.on('local:write', (_e, shellId, data) => {
+    try { localShell.write(shellId, data) } catch { /* 已关闭 */ }
+  })
+  ipcMain.on('local:kill', (_e, shellId) => localShell.kill(shellId))
   ipcMain.handle('ssh:reconnect', async (_e, connId, instance) => {
     // 断线重连：关闭旧连接，建立新连接并返回新 connId
     try {
@@ -425,6 +437,7 @@ function registerIpc() {
 app.whenReady().then(() => {
   store.init(app)
   sshManager = new SshManager(send)
+  localShell = new LocalShellManager(send)
   sftpManager = new SftpManager(sshManager)
   agentDeployer = new AgentDeployer(sshManager, sftpManager)
   sshManager.onClosed = (connId) => sftpManager.dropCache(connId)

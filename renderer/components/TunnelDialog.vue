@@ -126,18 +126,23 @@ defineExpose({ open })
 
 async function refresh() {
   if (!visible.value) return
-  const arr = await window.api.tunnelList(connId.value)
-  list.value = arr
-  // 远程转发的服务器侧监听检测（逐条异步查，结果落 remoteState）
-  for (const t of arr) {
-    if (t.type !== 'remote') continue
-    const port = Number(t.bindPort)
-    if (!port || remoteState[t.tunnelId + ':' + port] !== undefined) continue
-    const key = t.tunnelId + ':' + port
-    window.api.tunnelCheckRemote(connId.value, port).then((r) => {
-      remoteState[key] = r.ok ? r.listening : null
-      // 触发响应式更新（直接赋值 reactive 键即响应）
-    })
+  try {
+    const arr = await window.api.tunnelList(connId.value)
+    list.value = arr
+    // 远程转发的服务器侧监听检测（逐条异步查，结果落 remoteState）
+    for (const t of arr) {
+      if (t.type !== 'remote') continue
+      const port = Number(t.bindPort)
+      if (!port || remoteState[t.tunnelId + ':' + port] !== undefined) continue
+      const key = t.tunnelId + ':' + port
+      window.api.tunnelCheckRemote(connId.value, port).then((r) => {
+        remoteState[key] = r.ok ? r.listening : null
+        // 触发响应式更新（直接赋值 reactive 键即响应）
+      })
+    }
+  } catch (e) {
+    // 列表刷新失败要可见，不能静默吞掉（历史教训：IPC 克隆错误曾让列表永远空白）
+    dialog.showToast('刷新转发列表失败：' + (e.message || e))
   }
 }
 
@@ -175,12 +180,13 @@ async function add() {
     spec.bindPort = f.bindPort
   }
   if (!Number(spec.targetPort) || (f.type === 'local' && !Number(spec.listenPort)) || (f.type === 'remote' && !Number(spec.bindPort))) {
-    alert('端口必须是数字')
+    dialog.showToast('端口必须是数字')
     return
   }
   const res = await window.api.tunnelAdd(connId.value, spec)
   if (!res.ok) {
-    alert('建立失败：' + res.error)
+    // 原生 alert 在无边框窗口会躲到窗口后面装死，一律用应用内 toast
+    dialog.showToast('建立失败：' + res.error)
     return
   }
   dialog.showToast(f.type === 'local' ? '本地转发已建立' : '远程转发已建立（注意服务器防火墙需放行监听端口）')

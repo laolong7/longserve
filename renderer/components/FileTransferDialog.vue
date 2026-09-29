@@ -168,7 +168,7 @@ function taskStatusText(t) {
 async function open() {
   const tab = store.activeTab
   if (!tab || tab.status !== 'connected') {
-    alert('请先连接一个服务器，再使用文件传输')
+    dialog.showToast('请先连接一个服务器，再使用文件传输')
     return
   }
   connId.value = tab.id
@@ -269,23 +269,23 @@ async function mkdir(panel, side) {
   const res = side === 'local'
     ? await window.api.localMkdir(target)
     : await window.api.sftpMkdir(connId.value, target)
-  if (!res.ok) return alert('创建失败：' + res.error)
+  if (!res.ok) return dialog.showToast('创建失败：' + res.error)
   side === 'local' ? refreshLocal() : refreshRemote()
 }
 async function rename(panel, side) {
   const sel = panel.selected
-  if (sel.length !== 1) return alert('请勾选恰好一项进行重命名')
+  if (sel.length !== 1) return dialog.showToast('请勾选恰好一项进行重命名')
   const item = panel.entries.find((e) => e.name === sel[0])
   const newName = await dialog.askInput({ title: '重命名', value: item.name })
   if (!newName || newName === item.name) return
   const res = side === 'local'
     ? await window.api.localRename(item.path, joinPath(side, panel.dir, newName))
     : await window.api.sftpRename(connId.value, item.path, joinPath(side, panel.dir, newName))
-  if (!res.ok) return alert('重命名失败：' + res.error)
+  if (!res.ok) return dialog.showToast('重命名失败：' + res.error)
   side === 'local' ? refreshLocal() : refreshRemote()
 }
 async function del(panel, side) {
-  if (!panel.selected.length) return alert('请先勾选要删除的项')
+  if (!panel.selected.length) return dialog.showToast('请先勾选要删除的项')
   const ok = await dialog.askConfirm({
     title: '删除确认',
     message: `确定删除选中的 ${panel.selected.length} 项？（不可恢复）`
@@ -297,7 +297,7 @@ async function del(panel, side) {
     const res = side === 'local'
       ? await window.api.localDelete(item.path, item.isDir)
       : await window.api.sftpDelete(connId.value, item.path, item.isDir)
-    if (!res.ok) alert(`删除 ${name} 失败：` + res.error)
+    if (!res.ok) dialog.showToast(`删除 ${name} 失败：` + res.error)
   }
   side === 'local' ? refreshLocal() : refreshRemote()
 }
@@ -326,7 +326,7 @@ async function runTransfer(direction, items) {
   // 下载目标必须是真实目录："此电脑"盘符视图没有落盘目录，历史版本会静默
   // 写到相对路径 __drives__\ 下（进度显示完成但找不到文件），这里直接拦住
   if (direction === 'download' && local.dir === '__drives__') {
-    alert('请先在左侧进入一个具体的本机文件夹（如 D:\\downloads），再点下载')
+    dialog.showToast('请先在左侧进入一个具体的本机文件夹（如 D:\\downloads），再点下载')
     return
   }
   // 二次确认：明确列出传什么、传到哪
@@ -358,7 +358,7 @@ async function runTransfer(direction, items) {
       if (!res.ok && task.status === 'running') {
         task.status = 'error'
         task.error = res.error
-        alert(`传输 ${it.name} 失败：` + res.error)
+        dialog.showToast(`传输 ${it.name} 失败：` + res.error)
       }
     }
   } finally {

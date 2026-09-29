@@ -10,6 +10,8 @@
         <span class="log-title ellipsis" :title="`${srvName} · ${file}`">{{ srvName }} 日志</span>
         <span class="mono faint log-file ellipsis">{{ file }}</span>
         <span class="grow"></span>
+        <span class="log-resize-hint faint">右下角调整日志栏大小</span>
+        <span class="grow"></span>
         <input v-model="kw" class="log-kw mono" placeholder="关键字过滤/高亮…" @mousedown.stop />
         <button class="ghost icon-xs" title="清空显示" @click="lines = []">⌫</button>
         <button class="ghost icon-xs" title="关闭日志窗口" @click="close">✕</button>
@@ -215,6 +217,7 @@ defineExpose({ open })
 }
 .log-title { font-size: 12.5px; font-weight: 600; flex-shrink: 0; }
 .log-file { font-size: 10.5px; max-width: 200px; }
+.log-resize-hint { font-size: 10px; white-space: nowrap; pointer-events: none; }
 .log-kw {
   width: 150px;
   font-size: 11px;

@@ -271,7 +271,35 @@ function bindConn(connId) {
   if (unsubStage) { unsubStage(); unsubStage = null }
   connLog.value = []
   lastConnId = connId
-  if (!connId || !connId.startsWith('conn_')) return
+  if (!connId) return
+
+  // 本地终端（local_）：数据走 local:data / local:close，无连接阶段日志
+  if (connId.startsWith('local_')) {
+    ;(async () => {
+      unsubData = window.api.on(`local:data:${connId}`, (data) => {
+        const u8 = toU8(data)
+        term.write(u8)
+        ringPush(u8)
+        store.recordChunk(connId, u8)
+      })
+      unsubClose = window.api.on(`local:close:${connId}`, () => {
+        if (props.tab.status === 'connected') {
+          props.tab.status = 'closed'
+          term.writeln('\r\n\x1b[33m※ 本地终端已关闭\x1b[0m')
+        }
+      })
+      const pending = await window.api.localAttach(connId)
+      if (pending) {
+        const u8 = toU8(pending)
+        term.write(u8)
+        ringPush(u8)
+      }
+      fit()
+      term.focus()
+    })()
+    return
+  }
+  if (!connId.startsWith('conn_')) return
 
   ;(async () => {
     unsubStage = window.api.on(`conn:stage:${connId}`, (msg) => {
@@ -388,6 +416,7 @@ onMounted(() => {
   // 键盘输入 -> 服务器（与手敲完全一致）
   term.onData((d) => {
     if (props.tab.id.startsWith('conn_')) window.api.sshWrite(props.tab.id, d)
+    else if (props.tab.id.startsWith('local_')) window.api.localWrite(props.tab.id, d)
   })
   // 尺寸变化 -> 同步远端 pty
   term.onResize(({ rows, cols }) => {

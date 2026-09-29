@@ -321,12 +321,17 @@ class SshManager {
   listTunnels(connId) {
     return [...this.tunnels.entries()]
       .filter(([, t]) => !connId || t.connId === connId)
-      .map(([tunnelId, t]) => ({
-        tunnelId,
-        ...t,
-        // 本地转发：本机监听套接字的真实状态（创建失败/已断开时 listening=false）
-        listening: t.type === 'local' ? !!(t.server && t.server.listening) : null
-      }))
+      .map(([tunnelId, t]) => {
+        // 注意：绝不能把 t.server（net.Server）带进返回值——IPC 结构化克隆
+        // 遇到它必抛 DataCloneError，渲染层 refresh() 静默失败，列表永远空白
+        const { server, ...rest } = t
+        return {
+          tunnelId,
+          ...rest,
+          // 本地转发：本机监听套接字的真实状态（创建失败/已断开时 listening=false）
+          listening: t.type === 'local' ? !!(server && server.listening) : null
+        }
+      })
   }
 
   // 远程转发服务器侧监听检测：ss 查端口是否真的在监听（远程转发是否生效的最直接证据）

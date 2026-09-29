@@ -148,6 +148,13 @@ async function runTests(mgr, port) {
   const echo = await roundTrip(LISTEN, 'ping-through-tunnel\n')
   check('转发链路回声可达（mock 收到 dst 并回显）', echo.includes('echo:127.0.0.1:9999') && echo.includes('ping-through-tunnel'))
   check('tunnel:list 返回 1 条', mgr.listTunnels(connId).length === 1)
+  // 防回归（v1.13.2）：listTunnels 结果必须能过 IPC 结构化克隆——
+  // 曾把 net.Server 带出导致 DataCloneError，渲染层「已建立的转发」永远空白
+  {
+    let cloneOk = true
+    try { structuredClone(mgr.listTunnels(connId)) } catch { cloneOk = false }
+    check('tunnel:list 可结构化克隆（不含 net.Server，IPC 不炸）', cloneOk)
+  }
 
   // ---- stopTunnel ----
   mgr.stopTunnel(add.tunnelId)

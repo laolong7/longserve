@@ -26,6 +26,25 @@ function assertUsableKey(provider) {
   }
 }
 
+// 高级配置：自定义请求头 / 附加请求体（JSON 字符串，AI 设置里保存时已校验）
+// 附加请求体最后并入 payload，可覆盖任意字段（DeepSeek thinking 参数、max_tokens 等），
+// 这是"支持所有类型 AI"的万能出口
+function extraHeadersOf(provider) {
+  try {
+    const h = provider.extraHeaders ? JSON.parse(provider.extraHeaders) : null
+    return h && typeof h === 'object' ? h : {}
+  } catch {
+    return {}
+  }
+}
+function applyExtraBody(provider, payload) {
+  try {
+    const b = provider.extraBody ? JSON.parse(provider.extraBody) : null
+    if (b && typeof b === 'object') Object.assign(payload, b)
+  } catch { /* 配置写错不阻塞请求 */ }
+  return payload
+}
+
 // ---------- 候选地址 ----------
 // OpenAI 兼容：中转站路径变体多，404/405 时自动尝试下一个候选
 function chatUrlCandidatesOpenAI(raw) {
@@ -138,9 +157,10 @@ async function chatOpenAI(provider, body, emit, ac, ctx) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${provider.apiKey || ''}`
+      Authorization: `Bearer ${provider.apiKey || ''}`,
+      ...extraHeadersOf(provider)
     },
-    body: JSON.stringify({ model: provider.model, stream: true, ...body }),
+    body: JSON.stringify(applyExtraBody(provider, { model: provider.model, stream: true, ...body })),
     signal: ac.signal
   }, '对话接口')
 
@@ -275,9 +295,10 @@ async function chatAnthropic(provider, body, emit, ac, ctx) {
       // ANTHROPIC_AUTH_TOKEN 走 Bearer，官方走 x-api-key：两个都发，最大化网关兼容
       Authorization: `Bearer ${provider.apiKey || ''}`,
       'x-api-key': provider.apiKey || '',
-      'anthropic-version': '2023-06-01'
+      'anthropic-version': '2023-06-01',
+      ...extraHeadersOf(provider)
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(applyExtraBody(provider, payload)),
     signal: ac.signal
   }, '对话接口（Anthropic）')
 
