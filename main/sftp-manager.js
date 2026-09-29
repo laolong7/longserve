@@ -33,7 +33,42 @@ class SftpManager {
   }
 
   dropCache(connId) {
-    this.sftpCache.delete(connId)
+    // 必须真正 end 通道，只删缓存条目不会释放 sshd 会话位
+    // （sshd MaxSessions 紧的服务器上，残留的 sftp 通道会把后续 exec 卡到超时）
+    const sftp = this.sftpCache.get(connId)
+    if (sftp) {
+      this.sftpCache.delete(connId)
+      try { sftp.end() } catch { /* 已关闭时忽略 */ }
+    }
+  }
+
+  // 一次性 sftp 会话（不进缓存）：短时传输专用，close() 立即释放通道。
+  // 部署等场景用完即关，避免与文件浏览器共享缓存、也避免 MaxSessions 占位。
+  // 打开加超时：会话位被占满时 conn.sftp 回调永远不会触发，不能无限挂起。
+  openSession(connId, timeoutMs = 15000) {
+    const conn = this.ssh.getClient(connId)
+    return new Promise((resolve, reject) => {
+      let settled = false
+      const timer = setTimeout(() => {
+        if (settled) return
+        settled = true
+        reject(new Error(`SFTP 通道打开超时（${Math.round(timeoutMs / 1000)}s）：服务器会话数可能已满（sshd MaxSessions）`))
+      }, timeoutMs)
+      conn.sftp((err, sftp) => {
+        if (settled) {
+          // 超时后通道才姗姗来迟：立刻关掉，不留幽灵会话
+          if (!err && sftp) try { sftp.end() } catch { /* 忽略 */ }
+          return
+        }
+        settled = true
+        clearTimeout(timer)
+        if (err) return reject(new Error('SFTP 子系统打开失败：' + err.message))
+        resolve({
+          sftp,
+          close: () => { try { sftp.end() } catch { /* 已关闭时忽略 */ } }
+        })
+      })
+    })
   }
 
   // ---------- 目录操作 ----------

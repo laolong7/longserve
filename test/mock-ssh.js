@@ -70,18 +70,57 @@ const server = new ssh2.Server(
           })
         })
         session.on('sftp', (acceptSftp) => handleSftp(acceptSftp))
-        // exec 通道：ssh-manager.exec / 质量采样 / systemd 查询走这里
+        // exec 通道：ssh-manager.exec / 质量采样 / systemd 查询 / Agent 部署走这里
         session.on('exec', (acceptExec, _rejectExec, info) => {
           const ch = acceptExec()
           const cmd = (info.command || '').trim()
+          const done = (code) => { ch.exit(code); ch.close() }
           if (cmd === 'true' || cmd === ':') {
-            ch.exit(0); ch.close()
+            done(0)
+          } else if (cmd.startsWith('ss -tln')) {
+            // 端口预检（echo BUSY/FREE）与远程转发监听检测（echo YES/NO）：一律空闲
+            ch.write(cmd.includes('echo BUSY') ? 'FREE\n' : 'NO\n')
+            done(0)
+          } else if (/^cat /.test(cmd)) {
+            // cat '<path>' 2>/dev/null —— 部署读远程 config.json
+            const m = cmd.match(/^cat '([^']+)'/)
+            try {
+              ch.write(fs.readFileSync(resolve(m[1]), 'utf8'))
+              done(0)
+            } catch { done(1) }
+          } else if (cmd.includes('base64 -d')) {
+            // mkdir -p '<dir>' && echo '<b64>' | base64 -d > '<path>' —— 部署写配置/unit
+            const m = cmd.match(/mkdir -p '([^']+)' && echo '([^']*)' \| base64 -d > '([^']+)'/)
+            try {
+              fs.mkdirSync(resolve(m[1]), { recursive: true })
+              fs.writeFileSync(resolve(m[3]), Buffer.from(m[2], 'base64'))
+              done(0)
+            } catch (err) { ch.stderr.write(err.message + '\n'); done(1) }
+          } else if (cmd.startsWith('mkdir -p ')) {
+            const m = cmd.match(/^mkdir -p '([^']+)'/)
+            try { fs.mkdirSync(resolve(m[1]), { recursive: true }); done(0) }
+            catch (err) { ch.stderr.write(err.message + '\n'); done(1) }
+          } else if (cmd.startsWith('chmod')) {
+            done(0)
+          } else if (cmd.startsWith('systemctl is-active')) {
+            ch.write('active\n')
+            done(0)
+          } else if (cmd === 'systemctl daemon-reload' || cmd.startsWith('systemctl enable') || cmd.startsWith('systemctl restart') || cmd.startsWith('systemctl disable')) {
+            done(0)
           } else if (cmd.startsWith('systemctl')) {
             ch.write(SYSTEMD_SAMPLE)
-            ch.exit(0); ch.close()
+            done(0)
+          } else if (cmd.startsWith('command -v ufw') || cmd.startsWith('command -v firewall-cmd')) {
+            done(0) // 防火墙放行 best effort：当作成功
+          } else if (cmd.startsWith('curl ') || cmd.startsWith('wget ')) {
+            ch.write('{"ok":true}\n') // 健康检查 mock 成功
+            done(0)
+          } else if (cmd.startsWith('journalctl')) {
+            ch.write('mock: journalctl sample line\n')
+            done(0)
           } else {
             ch.stderr.write(`mock: ${cmd.split(' ')[0]}: command not found\n`)
-            ch.exit(127); ch.close()
+            done(127)
           }
         })
       })

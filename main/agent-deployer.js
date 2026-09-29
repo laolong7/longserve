@@ -26,12 +26,31 @@ function shQuote(s) {
   return "'" + String(s).replace(/'/g, "'\\''") + "'"
 }
 
+// exec 适配层：SshManager.exec 成功 resolve { code, stdout }、失败直接 reject，
+// 而部署器内部统一用 { ok, code, stdout, error } 形状判断。这里做归一化，
+// 并对瞬时失败（上传后线路抖动）自动重试一次。
+// 历史教训（v1.11.2 修复）：writeRemoteFile/readRemoteFile 曾按 (connId, cmd, timeout)
+// 三参调用，而包装器签名为 (cmd, timeout)——命令串被当成 timeout 塞进 setTimeout，
+// 1ms 后必然抛「命令超时（NaNs）」，表现为"部署永远假超时、提示 SSH 断开"。
+function makeExec(sshManager, connId) {
+  return async (cmd, timeout) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const r = await sshManager.exec(connId, cmd, timeout)
+        return { ok: true, code: r.code, stdout: r.stdout }
+      } catch (err) {
+        if (attempt >= 1) return { ok: false, error: err.message }
+        await new Promise((res) => setTimeout(res, 800))
+      }
+    }
+  }
+}
+
 // 远程写文本文件（base64 通道：内容里的引号/换行/$ 都不会破坏 shell）
 async function writeRemoteFile(ssh, remotePath, content) {
   const b64 = Buffer.from(content, 'utf8').toString('base64')
   const dir = path.posix.dirname(remotePath)
   const r = await ssh.exec(
-    null,
     `mkdir -p ${shQuote(dir)} && echo ${shQuote(b64)} | base64 -d > ${shQuote(remotePath)}`,
     20000
   )
@@ -40,7 +59,7 @@ async function writeRemoteFile(ssh, remotePath, content) {
 }
 
 async function readRemoteFile(ssh, remotePath) {
-  const r = await ssh.exec(null, `cat ${shQuote(remotePath)} 2>/dev/null`, 10000)
+  const r = await ssh.exec(`cat ${shQuote(remotePath)} 2>/dev/null`, 10000)
   if (!r.ok || r.code !== 0) return null
   try { return JSON.parse(r.stdout) } catch { return null }
 }
@@ -59,15 +78,7 @@ class AgentDeployer {
   async deploy(app, opts) {
     const { connId, instance, aiProvider, port = PORT_DEFAULT, onStep = () => {} } = opts
     const report = (phase, percent, msg) => onStep({ phase, percent, msg })
-    const ssh = {
-      exec: async (cmd, timeout) => {
-        // 大文件上传后 SSH 通道可能瞬时不稳：exec 失败自动重试一次
-        const r = await this.ssh.exec(connId, cmd, timeout)
-        if (r.ok) return r
-        await new Promise((res) => setTimeout(res, 800))
-        return this.ssh.exec(connId, cmd, timeout)
-      }
-    }
+    const ssh = { exec: makeExec(this.ssh, connId) }
 
     // 0. 本地二进制检查
     report('check', 3, '检查 Agent 程序包…')
@@ -80,10 +91,10 @@ class AgentDeployer {
     const portBusy = await this.checkPort(ssh, port)
     if (portBusy) throw new Error(`端口 ${port} 已被占用，请换一个端口再部署`)
 
-    // 2. 生成 token 与配置（纯本地，快）
+    // 2. 生成 token 与配置（纯 exec 小命令，连接最健康时先做完；
+    //    此阶段刻意不开 sftp 通道——sshd MaxSessions 紧的服务器上
+    //    "shell + sftp" 已占满会话位，再开 exec 会卡到超时）
     report('config', 10, '生成配置（token + AI 密钥）…')
-    const sftp = await this.getSftp(connId)
-    await this.mkdirpRemote(sftp, REMOTE_DIR + '/data')
     const existing = await readRemoteFile(ssh, REMOTE_DIR + '/data/config.json')
     const token = existing && existing.token ? existing.token : crypto.randomBytes(24).toString('hex')
     const config = {
@@ -125,15 +136,21 @@ class AgentDeployer {
     await writeRemoteFile(ssh, '/etc/systemd/system/' + SERVICE + '.service', unit)
     await ssh.exec('systemctl daemon-reload', 15000)
 
-    // 4. 上传二进制（最大耗时步骤，进度条主体）
+    // 4. 上传二进制（最大耗时步骤，进度条主体；sftp 一次性会话，用完即关）
     report('upload', 15, `上传 Agent 程序包（${(binSize / 1048576).toFixed(1)} MB）…`)
-    await this.putFile(sftp, bin, REMOTE_DIR + '/longserve-agent', (p) => {
-      report('upload', 15 + Math.floor((p.percent / 100) * 70), `上传中 ${p.percent}%`)
-    })
+    const mk = await ssh.exec(`mkdir -p ${shQuote(REMOTE_DIR)}`, 10000)
+    if (!mk.ok) throw new Error('创建远程目录失败：' + mk.error)
+    const session = await this.sftpProvider.openSession(connId)
+    try {
+      await this.putFile(session.sftp, bin, REMOTE_DIR + '/longserve-agent', (p) => {
+        report('upload', 15 + Math.floor((p.percent / 100) * 70), `上传中 ${p.percent}%`)
+      })
+    } finally {
+      // 关键：立即释放 sftp 子系统。部分服务器 sshd MaxSessions 收得很紧（1-2），
+      // sftp 通道不关，后续 exec 会被卡到超时（实测踩坑：命令超时假象）
+      session.close()
+    }
     report('upload', 86, '上传完成，设置执行权限…')
-    // 关键：立即释放 sftp 子系统。部分服务器 sshd MaxSessions 收得很紧（1-2），
-    // sftp 通道不关，后续 exec 会被卡到超时（实测踩坑：写入配置阶段命令超时）
-    this.sftpProvider.dropCache(connId)
     await ssh.exec(`chmod +x ${shQuote(REMOTE_DIR + '/longserve-agent')}`, 15000)
 
     // 5. 启动服务
@@ -161,7 +178,7 @@ class AgentDeployer {
 
   // 重新生成 token（解绑所有已扫码设备）：改配置 → 重启 → 返回新 token
   async regenerateToken(connId, port) {
-    const ssh = { exec: (cmd, timeout) => this.ssh.exec(connId, cmd, timeout) }
+    const ssh = { exec: makeExec(this.ssh, connId) }
     const cfg = await readRemoteFile(ssh, REMOTE_DIR + '/data/config.json')
     if (!cfg) throw new Error('该服务器尚未部署 Agent')
     cfg.token = crypto.randomBytes(24).toString('hex')
@@ -176,7 +193,7 @@ class AgentDeployer {
 
   // 卸载（桌面端会先二次确认）
   async undeploy(connId) {
-    const ssh = { exec: (cmd, timeout) => this.ssh.exec(connId, cmd, timeout) }
+    const ssh = { exec: makeExec(this.ssh, connId) }
     const r = await ssh.exec(
       `systemctl disable --now ${SERVICE} 2>/dev/null; rm -f /etc/systemd/system/${SERVICE}.service; systemctl daemon-reload 2>/dev/null; rm -rf ${REMOTE_DIR}`,
       30000
@@ -187,7 +204,7 @@ class AgentDeployer {
 
   // 运行状态（systemctl is-active + 健康检查）
   async status(connId, port) {
-    const ssh = { exec: (cmd, timeout) => this.ssh.exec(connId, cmd, timeout) }
+    const ssh = { exec: makeExec(this.ssh, connId) }
     const svc = await ssh.exec(`systemctl is-active ${SERVICE} 2>/dev/null`, 8000)
     const active = svc.ok && svc.stdout.trim() === 'active'
     const healthy = active ? await this.waitHealthy(ssh, port, 4) : false
@@ -224,20 +241,6 @@ class AgentDeployer {
     return false
   }
 
-  getSftp(connId) {
-    // 复用 SftpManager 的连接缓存（主进程装配时注入）
-    return this.sftpProvider.requestSftp(connId)
-  }
-
-  async mkdirpRemote(sftp, dir) {
-    const parts = dir.split('/').filter(Boolean)
-    let cur = ''
-    for (const p of parts) {
-      cur += '/' + p
-      await new Promise((resolve) => sftp.mkdir(cur, () => resolve()))
-    }
-  }
-
   putFile(sftp, localPath, remotePath, onPercent) {
     return new Promise((resolve, reject) => {
       const size = fs.statSync(localPath).size
@@ -251,4 +254,5 @@ class AgentDeployer {
   }
 }
 
-module.exports = { AgentDeployer, agentBinaryPath, REMOTE_DIR, SERVICE, PORT_DEFAULT }
+// makeExec / writeRemoteFile / readRemoteFile 导出供契约测试使用
+module.exports = { AgentDeployer, agentBinaryPath, REMOTE_DIR, SERVICE, PORT_DEFAULT, makeExec, writeRemoteFile, readRemoteFile }

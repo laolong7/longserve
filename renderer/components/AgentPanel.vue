@@ -79,7 +79,7 @@
         </div>
         <div v-if="deployError" class="key-warn">
           {{ deployError }}
-          <div v-if="/超时|断开|ECONN|终端/.test(deployError)" class="key-warn-sub">
+          <div v-if="/断开|ECONN|已关闭|上传失败/.test(deployError)" class="key-warn-sub">
             SSH 连接可能已断开（长时间大文件传输后线路不稳），请回主界面重新连接该服务器后再点部署。
           </div>
         </div>

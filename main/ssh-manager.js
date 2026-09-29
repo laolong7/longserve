@@ -330,10 +330,12 @@ class SshManager {
   }
 
   // 远程转发服务器侧监听检测：ss 查端口是否真的在监听（远程转发是否生效的最直接证据）
+  // 注意：exec 成功 resolve { code, stdout }（无 ok 字段）、失败 reject，
+  // 判断只能看 stdout / catch，不能按 { ok, error } 契约读
   async checkRemoteListen(connId, port) {
     try {
       const r = await this.exec(connId, `ss -tln 2>/dev/null | grep -q ':${Number(port)} ' && echo YES || echo NO`, 8000)
-      return r.ok ? r.stdout.includes('YES') : null
+      return r.stdout.includes('YES')
     } catch {
       return null // 连接断开等无法检测
     }
