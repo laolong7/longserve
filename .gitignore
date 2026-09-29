@@ -6,3 +6,4 @@ agent/release/
 agent/src/public/
 *.log
 .DS_Store
+LaolongRecord.md
