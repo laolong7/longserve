@@ -7,6 +7,7 @@
           <div class="set-tab" :class="{ on: tab === 'ai' }" @click="switchTab('ai')">AI 配置</div>
           <div class="set-tab" :class="{ on: tab === 'skills' }" @click="switchTab('skills')">AI 技能</div>
           <div class="set-tab" :class="{ on: tab === 'pipelines' }" @click="switchTab('pipelines')">流水线</div>
+          <div class="set-tab" :class="{ on: tab === 'agent' }" @click="switchTab('agent')">手机控制</div>
           <div class="set-tab" :class="{ on: tab === 'appearance' }" @click="switchTab('appearance')">外观</div>
           <div class="set-tab" :class="{ on: tab === 'data' }" @click="switchTab('data')">数据</div>
           <div class="grow"></div>
@@ -189,6 +190,11 @@
           </div>
         </div>
 
+        <!-- ================= 手机控制（Agent 部署与二维码） ================= -->
+        <div v-else-if="tab === 'agent'" style="display:flex; flex:1; min-height:0">
+          <AgentPanel style="display:flex; flex:1; min-height:0" />
+        </div>
+
         <!-- ================= 外观 ================= -->
         <div v-else-if="tab === 'appearance'" class="set-body">
           <div class="form-panel" style="max-width: 560px">
@@ -366,6 +372,10 @@
                 </datalist>
                 <div v-if="testResult" :class="testOk ? 'key-ok' : 'key-warn'">{{ testResult }}</div>
               </div>
+              <label class="reasoning-ck">
+                <input type="checkbox" v-model="form.reasoningBack" style="width:auto" />
+                <span>回传思考内容（DeepSeek 思考模式 + 工具调用时必需；个别严格网关不认此字段时报错就关掉）</span>
+              </label>
 
               <div class="form-actions">
                 <button
@@ -393,6 +403,7 @@ import { ref, reactive, watch, computed, inject } from 'vue'
 import { useConfigStore } from '../stores/config'
 import { useDialogStore } from '../stores/dialog'
 import { APPEARANCE_PRESETS, DEFAULT_APPEARANCE } from '../utils/appearance'
+import AgentPanel from './AgentPanel.vue'
 
 const config = useConfigStore()
 const dialog = useDialogStore()
@@ -750,7 +761,7 @@ function newProvider() {
   modelOptions.value = []
   keyDecryptFailed.value = false
   keyLocked.value = false
-  form.value = { id: null, name: '', protocol: 'openai', baseUrl: '', apiKey: '', model: '' }
+  form.value = { id: null, name: '', protocol: 'openai', baseUrl: '', apiKey: '', model: '', reasoningBack: true }
 }
 function startEditProvider(p) {
   editingId.value = p.id
@@ -781,7 +792,8 @@ async function saveProvider() {
     protocol: f.protocol === 'anthropic' ? 'anthropic' : 'openai',
     baseUrl: f.baseUrl.trim(),
     apiKey: formApiKey(),
-    model: (f.model || '').trim()
+    model: (f.model || '').trim(),
+    reasoningBack: f.reasoningBack !== false // 老配置/未勾选视为开启，DeepSeek 思考模式必需
   }
   const idx = config.aiProviders.findIndex((p) => p.id === data.id)
   if (idx >= 0) config.aiProviders[idx] = data
@@ -923,6 +935,17 @@ async function fetchModels() {
   align-items: center;
   gap: 8px;
 }
+.reasoning-ck {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 14px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.reasoning-ck input { margin-top: 2px; }
 .locked-box {
   flex: 1;
   padding: 6px 10px;

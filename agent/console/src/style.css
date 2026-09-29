@@ -1,0 +1,111 @@
+/* ============================================================
+   Longserve 控制台全局主题 —— 深海蓝科幻风（与桌面端同源配色）
+   手机优先：底部 tab 导航、大触控区、等宽显示 IP/命令
+   ============================================================ */
+:root {
+  --bg0: #0e1116;
+  --bg1: #141a22;
+  --bg2: #1b2330;
+  --bg3: #232e3d;
+  --border: rgba(92, 207, 230, 0.14);
+  --border-strong: rgba(92, 207, 230, 0.32);
+
+  --text: #cfe3ef;
+  --text-dim: #8595a5;
+  --text-faint: #5b6878;
+
+  --cyan: #5ccfe6;
+  --cyan-dim: rgba(92, 207, 230, 0.14);
+  --violet: #a78bfa;
+  --violet-dim: rgba(167, 139, 250, 0.12);
+  --amber: #f2b155;
+  --amber-dim: rgba(242, 177, 85, 0.14);
+  --red: #f2555a;
+  --red-dim: rgba(242, 85, 90, 0.14);
+  --green: #6ee7a0;
+  --green-dim: rgba(110, 231, 160, 0.14);
+
+  --font-ui: -apple-system, 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', 'Consolas', 'Courier New', monospace;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body, #app { height: 100%; margin: 0; }
+
+body {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  color: var(--text);
+  background:
+    radial-gradient(1200px 500px at 50% -10%, rgba(92, 207, 230, 0.07), transparent 60%),
+    linear-gradient(rgba(92, 207, 230, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(92, 207, 230, 0.035) 1px, transparent 1px),
+    var(--bg0);
+  background-size: auto, 44px 44px, 44px 44px, auto;
+  overscroll-behavior: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
+
+button {
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  color: var(--text);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 16px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+button:active { transform: translateY(1px); }
+button:disabled { opacity: 0.45; }
+button.primary {
+  background: var(--cyan-dim);
+  border-color: var(--border-strong);
+  color: var(--cyan);
+  font-weight: 600;
+}
+button.danger { background: var(--red-dim); border-color: rgba(242, 85, 90, 0.4); color: var(--red); }
+
+input, textarea {
+  font-family: var(--font-ui);
+  font-size: 14.5px;
+  color: var(--text);
+  background: var(--bg1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  outline: none;
+}
+input:focus, textarea:focus { border-color: var(--border-strong); }
+.mono { font-family: var(--font-mono); }
+
+/* 通用卡片：细边 + 左上角刻线（科幻装甲感） */
+.panel {
+  position: relative;
+  background: linear-gradient(180deg, rgba(92, 207, 230, 0.04), transparent 40%), var(--bg1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.panel::before {
+  content: '';
+  position: absolute;
+  top: -1px; left: 12px;
+  width: 34px; height: 2px;
+  background: linear-gradient(90deg, var(--cyan), transparent);
+  border-radius: 1px;
+  opacity: 0.8;
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@keyframes slideUp {
+  from { transform: translateY(30px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}

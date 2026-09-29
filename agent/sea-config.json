@@ -1,0 +1,12 @@
+{
+  "main": "dist/agent.cjs",
+  "output": "dist/sea-prep.blob",
+  "disableExperimentalSEAWarning": true,
+  "assets": {
+    "assets/index-CxZiuihe.css": "src/public/assets/index-CxZiuihe.css",
+    "assets/index-Da04US7x.js": "src/public/assets/index-Da04US7x.js",
+    "icon.png": "src/public/icon.png",
+    "index.html": "src/public/index.html",
+    "manifest.webmanifest": "src/public/manifest.webmanifest"
+  }
+}

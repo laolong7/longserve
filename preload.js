@@ -5,7 +5,7 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
 // 允许订阅的事件通道白名单（前缀匹配）
-const EVENT_PREFIXES = ['term:data:', 'term:close:', 'conn:stage:', 'sftp:progress:', 'ai:delta:', 'ai:done:', 'ai:error:', 'log:data:', 'log:close:', 'conn:quality:', 'tunnel:stopped']
+const EVENT_PREFIXES = ['term:data:', 'term:close:', 'conn:stage:', 'sftp:progress:', 'ai:delta:', 'ai:done:', 'ai:error:', 'log:data:', 'log:close:', 'conn:quality:', 'tunnel:stopped', 'agent:step:']
 
 function isAllowedChannel(ch) {
   return EVENT_PREFIXES.some((p) => ch.startsWith(p))
@@ -66,6 +66,13 @@ contextBridge.exposeInMainWorld('api', {
   aiChat: (opts) => ipcRenderer.invoke('ai:chat', opts),
   aiAbort: (eventId) => ipcRenderer.send('ai:abort', eventId),
   aiListModels: (provider) => ipcRenderer.invoke('ai:listModels', provider),
+
+  // ---------- 手机控制 Agent ----------
+  agentBinaryExists: () => ipcRenderer.invoke('agent:binary-exists'),
+  agentDeploy: (opts) => ipcRenderer.invoke('agent:deploy', opts),
+  agentUndeploy: (connId) => ipcRenderer.invoke('agent:undeploy', connId),
+  agentRegenToken: (connId, port) => ipcRenderer.invoke('agent:regen-token', connId, port),
+  agentStatus: (connId, port) => ipcRenderer.invoke('agent:status', connId, port),
 
   // ---------- 系统 ----------
   filePathForDrop: (file) => {

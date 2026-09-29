@@ -1,0 +1,11 @@
+{
+  "name": "longserve-agent",
+  "version": "1.10.0",
+  "description": "Longserve 手机控制微程序：部署在服务器上的常驻 Agent，自带 Web 控制台",
+  "main": "src/index.js",
+  "private": true,
+  "scripts": {
+    "dev": "node src/index.js",
+    "build": "node build.mjs"
+  }
+}

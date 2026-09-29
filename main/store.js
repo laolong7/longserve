@@ -111,10 +111,11 @@ function migrateFromLegacyName(app) {
 function defaults() {
   return {
     instances: [],          // { id, name, host, port, username, password }
-    aiProviders: [],        // { id, name, baseUrl, apiKey, model }
+    aiProviders: [],        // { id, name, baseUrl, apiKey, model, reasoningBack }
     activeAiProviderId: null,
     skills: [],             // { id, name, description, content, enabled }
     pipelines: [],          // { id, name, steps: [{ skillId, checkpoint }] } 技能流水线
+    agentDeployments: [],   // { id, instanceId, instanceName, host, port, token, aiProviderId, deployedAt } 手机控制 Agent 部署记录
     recordDir: '',          // 会话录制保存目录（空=默认 userData/recordings）
     appearance: null,       // 见 utils/appearance.js DEFAULT_APPEARANCE；null=默认主题
     defaultsVersion: 0,     // 预设技能/流水线版本标记（见 DEFAULTS_VERSION）
@@ -128,6 +129,7 @@ function normalize(raw) {
   if (!Array.isArray(cfg.aiProviders)) cfg.aiProviders = []
   if (!Array.isArray(cfg.skills)) cfg.skills = []
   if (!Array.isArray(cfg.pipelines)) cfg.pipelines = []
+  if (!Array.isArray(cfg.agentDeployments)) cfg.agentDeployments = []
   if (typeof cfg.recordDir !== 'string') cfg.recordDir = ''
   if (!cfg.appearance || typeof cfg.appearance !== 'object') cfg.appearance = null
   // 实例字段补全

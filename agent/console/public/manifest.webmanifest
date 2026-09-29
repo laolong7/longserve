@@ -1,0 +1,9 @@
+{
+  "name": "Longserve 控制台",
+  "short_name": "Longserve",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0e1116",
+  "theme_color": "#0e1116",
+  "icons": [{ "src": "/icon.png", "sizes": "256x256", "type": "image/png" }]
+}

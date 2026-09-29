@@ -8,6 +8,7 @@ export const useConfigStore = defineStore('config', {
     activeAiProviderId: null,
     skills: [],
     pipelines: [], // { id, name, steps: [{ skillId, checkpoint }] } 技能流水线
+    agentDeployments: [], // { id, instanceId, instanceName, host, port, token, aiProviderId, deployedAt } 手机控制部署记录
     recordDir: '', // 会话录制保存目录（空=默认）
     appearance: null,
     defaultsVersion: 0, // 预设技能/流水线版本标记（主进程 store.js 用，保存时必须透传）
@@ -28,6 +29,7 @@ export const useConfigStore = defineStore('config', {
       this.activeAiProviderId = cfg.activeAiProviderId || null
       this.skills = cfg.skills || []
       this.pipelines = cfg.pipelines || []
+      this.agentDeployments = cfg.agentDeployments || []
       this.recordDir = cfg.recordDir || ''
       this.appearance = cfg.appearance || null
       this.defaultsVersion = Number(cfg.defaultsVersion) || 0
@@ -45,6 +47,7 @@ export const useConfigStore = defineStore('config', {
         activeAiProviderId: this.activeAiProviderId,
         skills: JSON.parse(JSON.stringify(this.skills)),
         pipelines: JSON.parse(JSON.stringify(this.pipelines)),
+        agentDeployments: JSON.parse(JSON.stringify(this.agentDeployments)),
         recordDir: this.recordDir,
         appearance: this.appearance ? JSON.parse(JSON.stringify(this.appearance)) : null,
         defaultsVersion: this.defaultsVersion,
@@ -62,6 +65,9 @@ export const useConfigStore = defineStore('config', {
     },
     newSkillId() {
       return `sk_${Date.now()}_${Math.floor(Math.random() * 1e5)}`
+    },
+    newDeployId() {
+      return `dep_${Date.now()}_${Math.floor(Math.random() * 1e5)}`
     }
   }
 })

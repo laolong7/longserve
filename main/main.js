@@ -10,9 +10,11 @@ const store = require('./store')
 const SshManager = require('./ssh-manager')
 const SftpManager = require('./sftp-manager')
 const aiProxy = require('./ai-proxy')
+const { AgentDeployer, agentBinaryPath } = require('./agent-deployer')
 
 let sshManager = null
 let sftpManager = null
+let agentDeployer = null
 
 // 冒烟/并行开发隔离：SMOKE_USER_DATA=1 时用一次性临时 userData，
 // 避免与正式应用抢单实例锁和数据目录（正常启动不设置此变量，零影响）
@@ -298,6 +300,30 @@ function registerIpc() {
   ipcMain.handle('history:list', () => store.loadHistory())
   ipcMain.handle('history:save', (_e, sessions) => store.saveHistory(sessions))
 
+  // ---------- 手机控制 Agent（部署/卸载/换密钥/状态） ----------
+  ipcMain.handle('agent:binary-exists', () => fs.existsSync(agentBinaryPath(app)))
+  ipcMain.handle('agent:deploy', async (_e, opts) => {
+    // opts: { connId, instance, aiProvider, port }；部署进度经 agent:step:{connId} 推送
+    try {
+      const r = await agentDeployer.deploy(app, { ...opts, onStep: (msg) => send(`agent:step:${opts.connId}`, msg) })
+      return { ok: true, ...r }
+    } catch (err) {
+      return { ok: false, error: err.message }
+    }
+  })
+  ipcMain.handle('agent:undeploy', async (_e, connId) => {
+    try { return await agentDeployer.undeploy(connId) }
+    catch (err) { return { ok: false, error: err.message } }
+  })
+  ipcMain.handle('agent:regen-token', async (_e, connId, port) => {
+    try { return { ok: true, ...(await agentDeployer.regenerateToken(connId, port)) } }
+    catch (err) { return { ok: false, error: err.message } }
+  })
+  ipcMain.handle('agent:status', async (_e, connId, port) => {
+    try { return { ok: true, ...(await agentDeployer.status(connId, port)) } }
+    catch (err) { return { ok: false, error: err.message } }
+  })
+
   // AI 本地文件操作工具（读写删一律由渲染层弹确认后才调用）
   ipcMain.handle('local:read', async (_e, filePath) => {
     try {
@@ -384,6 +410,7 @@ app.whenReady().then(() => {
   store.init(app)
   sshManager = new SshManager(send)
   sftpManager = new SftpManager(sshManager)
+  agentDeployer = new AgentDeployer(sshManager, sftpManager)
   sshManager.onClosed = (connId) => sftpManager.dropCache(connId)
   registerIpc()
   createWindow()

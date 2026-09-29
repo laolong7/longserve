@@ -13,6 +13,7 @@ import { useTerminalStore } from './terminals'
 import { useDialogStore } from './dialog'
 import { checkDanger } from '../utils/danger'
 import { splitCmds } from '../utils/cmds.mjs'
+import { buildOpenAiMessages, REASONING_ERR_RE } from '../utils/aictx.mjs'
 
 // ---------- 工具定义（OpenAI tools 格式） ----------
 const TOOLS = [
@@ -263,6 +264,7 @@ export const useAiStore = defineStore('ai', {
       const simplified = this.messages.map((m) => ({
         role: m.role,
         content: m.content,
+        reasoning: m.reasoning || '', // 思考内容随历史保存：恢复会话后 DeepSeek 思考模式仍可正常续传
         tools: (m.toolCalls || []).map((tc) => ({
           name: tc.name,
           args: tc.argsJson,
@@ -289,6 +291,7 @@ export const useAiStore = defineStore('ai', {
         id: `msg_restore_${rec.id}_${i}`,
         role: m.role,
         content: m.content,
+        reasoning: m.reasoning || '',
         toolCalls: (m.tools || []).map((tc, j) => ({
           id: `tc_${i}_${j}`,
           name: tc.name,
@@ -513,6 +516,9 @@ export const useAiStore = defineStore('ai', {
 
           const result = await this.streamOnce(config.activeProvider, assistant)
           assistant.status = 'done'
+          if (result.degraded) {
+            useDialogStore().showToast('当前网关不支持「回传思考内容」，已自动改用普通模式发送')
+          }
 
           if (result.aborted) {
             assistant.content += '\n\n（已停止）'
@@ -545,7 +551,24 @@ export const useAiStore = defineStore('ai', {
       }
     },
 
-    streamOnce(provider, msg, overrides = {}) {
+    // 外层包装：网关明确拒绝 reasoning_content 字段时（个别严格校验的中转），
+    // 自动去掉思考回传重试一次，把"配置问题"变成无感降级
+    async streamOnce(provider, msg, overrides = {}) {
+      const res = await this.rawStreamOnce(provider, msg, overrides)
+      if (
+        res.error &&
+        overrides.forceNoReasoning !== true &&
+        provider.reasoningBack !== false &&
+        REASONING_ERR_RE.test(res.error)
+      ) {
+        const retry = await this.rawStreamOnce(provider, msg, { ...overrides, forceNoReasoning: true })
+        if (!retry.error) retry.degraded = true
+        return retry
+      }
+      return res
+    },
+
+    rawStreamOnce(provider, msg, overrides = {}) {
       return new Promise((resolve) => {
         const eventId = `evt_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
         this._activeEventId = eventId
@@ -596,8 +619,16 @@ export const useAiStore = defineStore('ai', {
           resolve({ error: 'AI 响应超时（5 分钟无回应），请重试；若持续出现请检查网络或重填 API Key' })
         }, 330000)
 
+        const baseMessages = overrides.messages || this.toOpenAiMessages()
         const body = {
-          messages: overrides.messages || this.toOpenAiMessages(),
+          // 降级重试时剥掉所有 assistant 消息的 reasoning_content 字段
+          messages: overrides.forceNoReasoning
+            ? baseMessages.map((m) => {
+                if (m.role !== 'assistant' || !m.reasoning_content) return m
+                const { reasoning_content, ...rest } = m
+                return rest
+              })
+            : baseMessages,
           temperature: 0.4
         }
         // tools: null 表示本轮禁用工具（命令模式）；默认带全量工具
@@ -613,28 +644,10 @@ export const useAiStore = defineStore('ai', {
     },
 
     toOpenAiMessages() {
-      const out = [{ role: 'system', content: this.systemContext() }]
-      const recent = this.messages.slice(-40)
-      for (const m of recent) {
-        if (m.role === 'user') {
-          out.push({ role: 'user', content: m.content })
-        } else if (m.role === 'assistant') {
-          const toolCalls = (m.toolCalls || []).map((tc) => ({
-            id: tc.id,
-            type: 'function',
-            function: { name: tc.name, arguments: tc.argsJson || '{}' }
-          }))
-          out.push({
-            role: 'assistant',
-            content: m.content || null,
-            ...(toolCalls.length ? { tool_calls: toolCalls } : {})
-          })
-          for (const tc of m.toolCalls || []) {
-            out.push({ role: 'tool', tool_call_id: tc.id, content: tc.result || '' })
-          }
-        }
-      }
-      return out
+      const config = useConfigStore()
+      // reasoningBack：AI 配置级开关（默认开启），DeepSeek 思考模式+工具调用必需
+      const reasoningBack = config.activeProvider?.reasoningBack !== false
+      return buildOpenAiMessages(this.messages.slice(-40), this.systemContext(), { reasoningBack })
     },
 
     systemContext() {

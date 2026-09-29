@@ -1,5 +1,8 @@
 node_modules/
 renderer/dist/
 release/
+agent/dist/
+agent/release/
+agent/src/public/
 *.log
 .DS_Store
