@@ -83,6 +83,21 @@
             SSH 连接可能已断开（长时间大文件传输后线路不稳），请回主界面重新连接该服务器后再点部署。
           </div>
         </div>
+        <!-- AI 失败诊断：部署失败自动分析 journalctl 日志，给出根因与修法 -->
+        <div v-if="diagLoading" class="ai-diag">
+          <span class="ai-diag-title">🔍 AI 诊断中…</span>
+          <span class="faint" style="font-size:11px">正在分析部署日志</span>
+        </div>
+        <div v-else-if="diag" class="ai-diag">
+          <div class="ai-diag-title">
+            🔍 AI 诊断<span v-if="diag.confidence === 'high'">（把握高）</span><span v-else-if="diag.confidence === 'medium'">（中等把握）</span><span v-else>（把握低，日志可能不足）</span>
+          </div>
+          <div v-if="diag.rootCause" class="ai-diag-row"><b>根因：</b>{{ diag.rootCause }}</div>
+          <div v-if="diag.fix" class="ai-diag-row ai-diag-fix"><b>怎么修：</b><br>{{ diag.fix }}</div>
+        </div>
+        <div v-else-if="diagError" class="key-warn" style="font-size:11.5px">
+          AI 诊断不可用：{{ diagError }}（不影响上方错误信息）
+        </div>
 
         <div class="form-actions">
           <div class="grow"></div>
@@ -164,6 +179,9 @@ const currentId = ref(null)
 const form = ref({ instanceId: '', aiProviderId: '', port: 37777 })
 const deploying = ref(false)
 const deployError = ref('')
+const diagLoading = ref(false)
+const diag = ref(null) // { rootCause, fix, confidence }
+const diagError = ref('')
 const progress = reactive({ phase: '', percent: 0, msg: '' })
 const qrDataUrl = ref('')
 const checking = ref(false)
@@ -206,10 +224,29 @@ function startNew() {
   mode.value = 'new'
   currentId.value = null
   deployError.value = ''
+  diag.value = null
+  diagError.value = ''
+  diagLoading.value = false
   progress.phase = ''
   progress.percent = 0
   progress.msg = ''
   form.value = { instanceId: '', aiProviderId: '', port: 37777 }
+}
+
+// 部署失败后的 AI 诊断：用部署时所选的 AI 配置分析错误（含 journalctl 日志）
+async function runDiagnose(provider, errorText) {
+  diag.value = null
+  diagError.value = ''
+  diagLoading.value = true
+  try {
+    const r = await window.api.agentDiagnose(JSON.parse(JSON.stringify(provider)), errorText)
+    if (r.ok) diag.value = r.diag
+    else diagError.value = r.error
+  } catch (e) {
+    diagError.value = e.message || String(e)
+  } finally {
+    diagLoading.value = false
+  }
 }
 
 async function select(d) {
@@ -246,6 +283,7 @@ async function deploy() {
   deploying.value = false
   if (!r.ok) {
     deployError.value = r.error
+    runDiagnose(provider, r.error) // 异步诊断，不阻塞错误展示
     return
   }
   // 保存部署记录
@@ -436,6 +474,21 @@ onUnmounted(() => {
 .dp-step.active::before { background: var(--amber); animation: pulse 0.9s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 .key-warn-sub { margin-top: 6px; color: var(--text-dim); font-size: 11.5px; }
+/* ---------- AI 失败诊断 ---------- */
+.ai-diag {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text);
+  background: var(--bg2);
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--cyan);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+}
+.ai-diag-title { color: var(--cyan); font-weight: 600; margin-bottom: 4px; }
+.ai-diag-row b { color: var(--text); }
+.ai-diag-fix { white-space: pre-line; font-family: var(--mono, monospace); font-size: 11.5px; }
 .qr-wrap { text-align: center; margin-bottom: 16px; }
 .qr {
   width: 180px; height: 180px;

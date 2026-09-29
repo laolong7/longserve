@@ -74,6 +74,7 @@ contextBridge.exposeInMainWorld('api', {
   agentUndeploy: (connId) => ipcRenderer.invoke('agent:undeploy', connId),
   agentRegenToken: (connId, port) => ipcRenderer.invoke('agent:regen-token', connId, port),
   agentStatus: (connId, port) => ipcRenderer.invoke('agent:status', connId, port),
+  agentDiagnose: (provider, errorText) => ipcRenderer.invoke('agent:diagnose', provider, errorText),
 
   // ---------- 系统 ----------
   filePathForDrop: (file) => {

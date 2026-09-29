@@ -11,6 +11,7 @@ const SshManager = require('./ssh-manager')
 const SftpManager = require('./sftp-manager')
 const aiProxy = require('./ai-proxy')
 const { AgentDeployer, agentBinaryPath } = require('./agent-deployer')
+const { diagnoseDeploy } = require('./agent-diagnose')
 
 let sshManager = null
 let sftpManager = null
@@ -326,6 +327,11 @@ function registerIpc() {
   })
   ipcMain.handle('agent:status', async (_e, connId, port) => {
     try { return { ok: true, ...(await agentDeployer.status(connId, port)) } }
+    catch (err) { return { ok: false, error: err.message } }
+  })
+  // 部署失败 AI 诊断：把错误（含 journalctl 日志）交给所选 AI 分析根因与修法
+  ipcMain.handle('agent:diagnose', async (_e, provider, errorText) => {
+    try { return { ok: true, diag: await diagnoseDeploy(provider, errorText) } }
     catch (err) { return { ok: false, error: err.message } }
   })
 
