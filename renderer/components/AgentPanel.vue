@@ -164,7 +164,8 @@
             卸载会停止并删除服务器上的 Agent 与其数据（不影响其他服务）。
           </div>
           <div class="form-actions">
-            <button class="danger" @click="undeploy">卸载</button>
+            <button class="danger" @click="undeploy" :disabled="undeploying">{{ undeploying ? '卸载中…' : '卸载' }}</button>
+            <button @click="redeploy" title="原地重部署最新版：保留密钥，手机不用重新扫码">更新 Agent</button>
             <div class="grow"></div>
             <button class="regen-btn" @click="regenToken" :disabled="regening">{{ regening ? '生成中…' : '重新生成密钥' }}</button>
           </div>
@@ -253,6 +254,7 @@ const qrDataUrl = ref('')
 const checking = ref(false)
 const statusText = ref('')
 const regening = ref(false)
+const undeploying = ref(false)
 let stepUnsub = null
 
 // 详情子页签 + 磁盘记录（手机端指令/聊天记录，SSH 直读服务器磁盘）
@@ -455,7 +457,12 @@ async function regenToken() {
     dialog.showToast('请先连接该服务器再操作')
     return
   }
-  if (!window.confirm('重新生成密钥后，所有已绑定的手机都会失效（需要重新扫码）。继续？')) return
+  // 用应用内确认弹窗：Electron 无边框窗口里原生 window.confirm 会弹到窗口后面/无响应
+  const okGo = await dialog.askConfirm({
+    title: '重新生成密钥',
+    message: '所有已绑定的手机都会失效（需要重新扫码）。继续？'
+  })
+  if (!okGo) return
   regening.value = true
   const r = await window.api.agentRegenToken(conn.id, current.value.port)
   regening.value = false
@@ -470,22 +477,52 @@ async function regenToken() {
 }
 
 async function undeploy() {
+  if (undeploying.value) return
   const conn = connOf(current.value.instanceId)
   if (!conn) {
     dialog.showToast('请先连接该服务器再操作')
     return
   }
-  if (!window.confirm(`确定卸载服务器「${current.value.instanceName}」上的 Agent？\n将停止服务并删除 /opt/longserve-agent（不影响其他服务）。`)) return
-  const r = await window.api.agentUndeploy(conn.id)
-  if (!r.ok) {
-    dialog.showToast('卸载失败：' + r.error)
-    return
+  const okGo = await dialog.askConfirm({
+    title: '卸载 Agent',
+    message: `确定卸载服务器「${current.value.instanceName}」上的 Agent？将停止服务并删除 /opt/longserve-agent（不影响其他服务）。`
+  })
+  if (!okGo) return
+  undeploying.value = true
+  try {
+    const r = await window.api.agentUndeploy(conn.id)
+    if (!r.ok) {
+      dialog.showToast('卸载失败：' + r.error)
+      return
+    }
+    config.agentDeployments = config.agentDeployments.filter((d) => d.id !== current.value.id)
+    await config.save()
+    mode.value = 'empty'
+    currentId.value = null
+    dialog.showToast('已卸载')
+  } finally {
+    undeploying.value = false
   }
-  config.agentDeployments = config.agentDeployments.filter((d) => d.id !== current.value.id)
-  await config.save()
-  mode.value = 'empty'
-  currentId.value = null
-  dialog.showToast('已卸载')
+}
+
+// 更新 Agent（原地重部署，token 保留、手机不用重新扫码）：预填表单进入部署流程
+function redeploy() {
+  const d = current.value
+  if (!d) return
+  deployError.value = ''
+  diag.value = null
+  diagError.value = ''
+  diagLoading.value = false
+  progress.phase = ''
+  progress.percent = 0
+  progress.msg = ''
+  form.value = {
+    instanceId: d.instanceId || '',
+    aiProviderId: d.aiProviderId || '',
+    port: d.port || 37777
+  }
+  mode.value = 'new'
+  currentId.value = d.id
 }
 
 function copyLink() {
