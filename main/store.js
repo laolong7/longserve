@@ -189,11 +189,6 @@ const DEFAULT_SKILLS = [
     content: '日志排查流程：\n1. 确认服务名：systemctl list-units --type=service | grep 关键词\n2. journalctl -u 服务名 --since "1 hour ago" --no-pager -n 200 看近期日志\n3. 应用日志去 /var/log/ 下找对应文件 tail -n 200\n4. 归纳重复出现的报错模式，给出结论与修复建议。只读操作。'
   },
   {
-    id: 'sk_preset_deploy', name: '部署学子急事通', enabled: true,
-    description: '当要求部署/更新/重启学子急事通服务时使用',
-    content: '学子急事通部署流程（路径 /var/www/student_emergency）：\n1. backup_file 备份 backend 目录下的关键配置\n2. cd /var/www/student_emergency && git pull（或按用户给的源更新）\n3. 确认 frontend/dist 为最新构建\n4. systemctl restart gunicorn，read_terminal 确认无报错\n5. curl -sI http://127.0.0.1 检查响应；异常时 journalctl -u gunicorn -n 50 排查，必要时 restore_file 回滚'
-  },
-  {
     id: 'sk_preset_clean', name: '磁盘清理', enabled: true,
     description: '当磁盘空间紧张，要求清理空间时使用',
     content: '磁盘清理守则（保守优先）：\n1. df -h 找大分区，du -sh /var/log /tmp /var/cache 逐层定位大头\n2. 只清安全项：journalctl --vacuum-size=200M、包管理缓存（apt clean / yum clean all）\n3. 大日志用 truncate -s 0 截断（不删文件，避免服务句柄问题）；删除任何文件前必须弹窗确认\n4. 清理前后各跑一次 df -h，对比汇报释放了多少空间'
@@ -205,14 +200,6 @@ const DEFAULT_PIPELINES = [
     steps: [
       { skillId: 'sk_preset_health', checkpoint: true },
       { skillId: 'sk_preset_clean', checkpoint: true }
-    ]
-  },
-  {
-    id: 'pl_preset_deploy', name: '学子急事通发布',
-    steps: [
-      { skillId: 'sk_preset_health', checkpoint: true },
-      { skillId: 'sk_preset_deploy', checkpoint: true },
-      { skillId: 'sk_preset_logs', checkpoint: true }
     ]
   },
   {
@@ -233,7 +220,19 @@ const DEFAULT_PIPELINES = [
 
 // 预设版本号：升级新增预设时 +1，load() 会把缺的默认项一次性补进已有配置；
 // 补齐后写入版本标记，之后用户删除预设不会再复活
-const DEFAULTS_VERSION = 2
+const DEFAULTS_VERSION = 3
+
+// v3 迁移：移除"学子急事通"预设（牢笼个人项目的部署流程，不该作为通用默认值分发）
+// 用户配置里已注入的删掉；其他流水线里引用该技能的步骤一并移除（空流水线也删）
+const RETIRED_PRESET_IDS = ['sk_preset_deploy', 'pl_preset_deploy']
+
+function retirePresets(cfg) {
+  cfg.skills = (cfg.skills || []).filter((s) => !RETIRED_PRESET_IDS.includes(s.id))
+  cfg.pipelines = (cfg.pipelines || [])
+    .map((p) => ({ ...p, steps: (p.steps || []).filter((st) => !RETIRED_PRESET_IDS.includes(st.skillId)) }))
+    // 退役流水线整体删除；用户流水线的步骤若全被退役也删（空流水线无意义，且保存时校验至少一步）
+    .filter((p) => p.steps.length > 0 && !RETIRED_PRESET_IDS.includes(p.id))
+}
 
 // 读取（内存缓存；返回的对象允许渲染层直接修改后回传保存）
 function load() {
@@ -247,6 +246,8 @@ function load() {
   // 预设注入/回填：首次启动全量注入；老配置升级到新预设版本时补齐缺失项
   // （只按 id 补缺，不覆盖用户改过的；补完写入版本标记，之后删除不复活）
   if (firstRun || Number(raw && raw.defaultsVersion) !== DEFAULTS_VERSION) {
+    // v3 迁移：先退役"学子急事通"预设（版本跨度内一次性执行）
+    if (Number(raw && raw.defaultsVersion) < 3) retirePresets(cfg)
     for (const s of DEFAULT_SKILLS) {
       if (!cfg.skills.some((x) => x.id === s.id)) cfg.skills.push(JSON.parse(JSON.stringify(s)))
     }

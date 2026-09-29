@@ -58,14 +58,31 @@
           </div>
         </div>
 
-        <!-- 部署进度 -->
-        <div v-if="steps.length" class="steps panel">
-          <div v-for="(s, i) in steps" :key="i" class="step" :class="{ last: i === steps.length - 1 }">
-            <span class="step-dot" :class="{ spinning: i === steps.length - 1 && deploying }"></span>
-            {{ s }}
+        <!-- 部署进度：统一进度条 + 科幻动画 -->
+        <div v-if="deploying || progress.percent >= 100" class="deploy-progress panel">
+          <div class="dp-head">
+            <span class="dp-phase">{{ progress.msg }}</span>
+            <span class="mono dp-pct">{{ progress.percent }}%</span>
+          </div>
+          <div class="dp-bar">
+            <div class="dp-fill" :style="{ width: progress.percent + '%' }"></div>
+            <div class="dp-scan"></div>
+          </div>
+          <div class="dp-steps">
+            <span
+              v-for="s in PHASES"
+              :key="s.id"
+              class="dp-step"
+              :class="{ done: progress.percent > s.at, active: currentPhase === s.id }"
+            >{{ s.label }}</span>
           </div>
         </div>
-        <div v-if="deployError" class="key-warn">{{ deployError }}</div>
+        <div v-if="deployError" class="key-warn">
+          {{ deployError }}
+          <div v-if="/超时|断开|ECONN|终端/.test(deployError)" class="key-warn-sub">
+            SSH 连接可能已断开（长时间大文件传输后线路不稳），请回主界面重新连接该服务器后再点部署。
+          </div>
+        </div>
 
         <div class="form-actions">
           <div class="grow"></div>
@@ -132,7 +149,7 @@
 </template>
 
 <script setup>
-import { ref, computed, inject, onUnmounted } from 'vue'
+import { ref, reactive, computed, inject, onUnmounted } from 'vue'
 import QRCode from 'qrcode'
 import { useConfigStore } from '../stores/config'
 import { useTerminalStore } from '../stores/terminals'
@@ -147,12 +164,26 @@ const currentId = ref(null)
 const form = ref({ instanceId: '', aiProviderId: '', port: 37777 })
 const deploying = ref(false)
 const deployError = ref('')
-const steps = ref([])
+const progress = reactive({ phase: '', percent: 0, msg: '' })
 const qrDataUrl = ref('')
 const checking = ref(false)
 const statusText = ref('')
 const regening = ref(false)
 let stepUnsub = null
+
+// 部署阶段里程碑（与主进程 agent-deployer 的 percent 对齐）
+const PHASES = [
+  { id: 'check', label: '检查', at: 6 },
+  { id: 'config', label: '配置', at: 15 },
+  { id: 'upload', label: '上传', at: 86 },
+  { id: 'service', label: '启动', at: 94 },
+  { id: 'health', label: '体检', at: 100 }
+]
+const currentPhase = computed(() => {
+  let cur = ''
+  for (const s of PHASES) if (progress.percent >= s.at - 8) cur = s.id
+  return cur
+})
 
 const current = computed(() => config.agentDeployments.find((d) => d.id === currentId.value) || null)
 const link = computed(() => (current.value ? `http://${current.value.host}:${current.value.port}/?token=${current.value.token}` : ''))
@@ -175,7 +206,9 @@ function startNew() {
   mode.value = 'new'
   currentId.value = null
   deployError.value = ''
-  steps.value = []
+  progress.phase = ''
+  progress.percent = 0
+  progress.msg = ''
   form.value = { instanceId: '', aiProviderId: '', port: 37777 }
 }
 
@@ -197,11 +230,15 @@ async function deploy() {
   }
   deploying.value = true
   deployError.value = ''
-  steps.value = []
-  // 订阅部署步骤事件
+  progress.phase = 'check'
+  progress.percent = 0
+  progress.msg = '准备部署…'
+  // 订阅部署进度事件（主进程推结构化 { phase, percent, msg }）
   if (stepUnsub) stepUnsub()
-  stepUnsub = window.api.on(`agent:step:${conn.id}`, (msg) => {
-    steps.value.push(msg)
+  stepUnsub = window.api.on(`agent:step:${conn.id}`, (p) => {
+    progress.phase = p.phase
+    progress.percent = Math.max(progress.percent, p.percent || 0)
+    progress.msg = p.msg || progress.msg
   })
   const r = await window.api.agentDeploy({
     connId: conn.id,
@@ -332,18 +369,77 @@ onUnmounted(() => {
   border-radius: var(--radius-sm);
   padding: 6px 10px;
 }
-.steps {
-  padding: 10px 12px;
-  max-height: 180px;
-  overflow-y: auto;
-  margin-bottom: 12px;
-  font-size: 11.5px;
+/* ---------- 部署进度条 ---------- */
+.deploy-progress {
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  position: relative;
+  overflow: hidden;
 }
-.step { display: flex; align-items: center; gap: 8px; padding: 3px 0; color: var(--text-dim); }
-.step.last { color: var(--text); }
-.step-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); flex-shrink: 0; }
-.step-dot.spinning { animation: pulse 1s ease-in-out infinite; }
-@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+.dp-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 9px; }
+.dp-phase { font-size: 12px; color: var(--text); }
+.dp-pct { font-size: 12px; color: var(--cyan); font-weight: 700; }
+.dp-bar {
+  position: relative;
+  height: 10px;
+  background: var(--bg0);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.dp-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #2b7f93, var(--cyan));
+  border-radius: 5px;
+  transition: width 0.4s ease;
+  box-shadow: 0 0 10px rgba(92, 207, 230, 0.5);
+  position: relative;
+  overflow: hidden;
+}
+/* 流动的能量条纹 */
+.dp-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    115deg,
+    transparent 0 10px,
+    rgba(255, 255, 255, 0.22) 10px 14px
+  );
+  animation: dpflow 0.9s linear infinite;
+}
+@keyframes dpflow { to { transform: translateX(-24px); } }
+/* 扫描光带（未满部分游走） */
+.dp-scan {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 36px;
+  background: linear-gradient(90deg, transparent, rgba(92, 207, 230, 0.35), transparent);
+  animation: dpscan 1.6s ease-in-out infinite;
+}
+@keyframes dpscan {
+  0% { left: -36px; }
+  100% { left: 100%; }
+}
+.dp-steps { display: flex; gap: 14px; margin-top: 9px; }
+.dp-step { font-size: 10.5px; color: var(--text-faint); position: relative; padding-left: 10px; }
+.dp-step::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--bg3);
+}
+.dp-step.done { color: var(--cyan); }
+.dp-step.done::before { background: var(--cyan); box-shadow: 0 0 5px var(--cyan); }
+.dp-step.active { color: var(--text); }
+.dp-step.active::before { background: var(--amber); animation: pulse 0.9s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+.key-warn-sub { margin-top: 6px; color: var(--text-dim); font-size: 11.5px; }
 .qr-wrap { text-align: center; margin-bottom: 16px; }
 .qr {
   width: 180px; height: 180px;

@@ -108,7 +108,10 @@ function emitJsonOnce(j, emit) {
   // OpenAI 形态：{ choices: [{ message: { content, tool_calls } }] }
   const msg = j && j.choices && j.choices[0] && j.choices[0].message
   if (msg) {
-    if (msg.reasoning_content || msg.reasoning) emit('delta', { reasoning: msg.reasoning_content || msg.reasoning })
+    // 思考字段三家并存：reasoning_content（DeepSeek-R1）/ reasoning / thinking（DeepSeek v4 思考模式）
+    if (msg.reasoning_content || msg.reasoning || msg.thinking) {
+      emit('delta', { reasoning: msg.reasoning_content || msg.reasoning || msg.thinking })
+    }
     if (msg.content) emit('delta', { content: msg.content })
     if (msg.tool_calls && msg.tool_calls.length) {
       emit('delta', {
@@ -177,8 +180,9 @@ async function chatOpenAI(provider, body, emit, ac, ctx) {
         if (!choice) continue
         const delta = choice.delta || {}
         const piece = {}
-        // 推理模型的思考增量（DeepSeek-R1/o系/Gemini thinking 等）：字段名两家并存
-        const reasoning = delta.reasoning_content || delta.reasoning
+        // 推理模型的思考增量：字段名三家并存
+        // reasoning_content（DeepSeek-R1）/ reasoning（Gemini 等兼容层）/ thinking（DeepSeek v4 思考模式）
+        const reasoning = delta.reasoning_content || delta.reasoning || delta.thinking
         if (reasoning) piece.reasoning = reasoning
         if (delta.content) piece.content = delta.content
         if (delta.tool_calls && delta.tool_calls.length) {

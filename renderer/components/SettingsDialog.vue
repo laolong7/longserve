@@ -649,7 +649,8 @@ async function saveSkill() {
   else config.skills.push(data)
   await config.save()
   dialog.showToast('技能已保存')
-  close() // 保存成功离开编辑界面
+  // 保存后停留在当前编辑界面
+  editingId.value = data.id
 }
 async function removeSkillCurrent() {
   const id = editingId.value
@@ -732,7 +733,8 @@ async function saveInstance() {
   else config.instances.push(data)
   await config.save()
   dialog.showToast('服务器配置已保存')
-  close() // 保存成功离开编辑界面
+  // 保存后停留在当前编辑界面（不再整体关闭弹窗），左侧列表同步刷新
+  editingId.value = data.id
 }
 function removeInstanceCurrent() {
   const id = editingId.value
@@ -804,7 +806,10 @@ async function saveProvider() {
   }
   await config.save()
   dialog.showToast('AI 配置已保存')
-  close() // 保存成功离开编辑界面
+  // 保存后停留在当前编辑界面（新密钥保存后仍锁定回显），左侧列表同步刷新
+  keyLocked.value = !!data.apiKey
+  form.value = { ...data, apiKey: keyLocked.value ? '__locked__' : '' }
+  editingId.value = data.id
 }
 function removeProviderCurrent() {
   const id = editingId.value

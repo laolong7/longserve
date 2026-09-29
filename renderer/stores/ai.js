@@ -621,11 +621,11 @@ export const useAiStore = defineStore('ai', {
 
         const baseMessages = overrides.messages || this.toOpenAiMessages()
         const body = {
-          // 降级重试时剥掉所有 assistant 消息的 reasoning_content 字段
+          // 降级重试时剥掉所有 assistant 消息的思考回传字段（reasoning_content/thinking）
           messages: overrides.forceNoReasoning
             ? baseMessages.map((m) => {
-                if (m.role !== 'assistant' || !m.reasoning_content) return m
-                const { reasoning_content, ...rest } = m
+                if (m.role !== 'assistant' || (!m.reasoning_content && !m.thinking)) return m
+                const { reasoning_content, thinking, ...rest } = m
                 return rest
               })
             : baseMessages,

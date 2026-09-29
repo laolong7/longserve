@@ -193,7 +193,9 @@ async function openaiStream(ai, messages, handlers, signal) {
     if (j.error) throw new Error(j.error.message || String(j.error))
     const m = j.choices && j.choices[0] && j.choices[0].message
     if (m) {
-      if (m.reasoning_content || m.reasoning) handlers.onReasoning(m.reasoning_content || m.reasoning)
+      if (m.reasoning_content || m.reasoning || m.thinking) {
+        handlers.onReasoning(m.reasoning_content || m.reasoning || m.thinking)
+      }
       if (m.content) handlers.onDelta(m.content)
       if (Array.isArray(m.tool_calls)) {
         for (const [i, tc] of m.tool_calls.entries()) {
@@ -228,7 +230,8 @@ async function openaiStream(ai, messages, handlers, signal) {
         const choice = chunk.choices && chunk.choices[0]
         if (!choice) continue
         const delta = choice.delta || {}
-        const reasoning = delta.reasoning_content || delta.reasoning
+        // 思考字段三家并存：reasoning_content / reasoning / thinking（DeepSeek v4 思考模式）
+        const reasoning = delta.reasoning_content || delta.reasoning || delta.thinking
         if (reasoning) handlers.onReasoning(reasoning)
         if (delta.content) handlers.onDelta(delta.content)
         if (Array.isArray(delta.tool_calls) && delta.tool_calls.length) {
@@ -281,9 +284,13 @@ async function runChat(text, emit, signal) {
       if (ai.mock) await mockStream(messages, handlers, signal)
       else await openaiStream(ai, messages, handlers, signal)
 
-      // 组装 assistant 消息：思考内容必须随消息保存（下轮回传，DeepSeek 强制要求）
+      // 组装 assistant 消息：思考内容必须随消息保存并回传（DeepSeek 强制要求）。
+      // 同时携带 reasoning_content 与 thinking 两种字段名，兼容不同网关/模型版本的校验
       const assistant = { role: 'assistant', content: content || null }
-      if (reasoning) assistant.reasoning_content = reasoning
+      if (reasoning) {
+        assistant.reasoning_content = reasoning
+        assistant.thinking = reasoning
+      }
       const calls = pendingCalls.filter(Boolean).map((c, i) => ({
         id: c.id || `call_${Date.now()}_${i}`,
         type: 'function',

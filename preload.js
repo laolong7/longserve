@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('api', {
   tunnelAdd: (connId, spec) => ipcRenderer.invoke('tunnel:add', connId, spec),
   tunnelStop: (tunnelId) => ipcRenderer.send('tunnel:stop', tunnelId),
   tunnelList: (connId) => ipcRenderer.invoke('tunnel:list', connId),
+  tunnelCheckRemote: (connId, port) => ipcRenderer.invoke('tunnel:check-remote', connId, port),
   recordingsDefaultDir: () => ipcRenderer.invoke('recordings:default-dir'),
   recordingsRead: (filePath) => ipcRenderer.invoke('recordings:read', filePath),
   recordingsWriteBinary: (filePath, base64) => ipcRenderer.invoke('recordings:write-binary', filePath, base64),

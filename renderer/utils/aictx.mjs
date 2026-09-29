@@ -24,9 +24,14 @@ export function buildOpenAiMessages(recentMsgs, systemContent, { reasoningBack =
         function: { name: tc.name, arguments: tc.argsJson || '{}' }
       }))
       const msg = { role: 'assistant', content: m.content || null }
-      // 思考内容回传（DeepSeek thinking+tools 必需；无关网关多数字段会被忽略，
-      // 严格网关可在 AI 配置里关掉「回传思考内容」）
-      if (reasoningBack && m.reasoning) msg.reasoning_content = m.reasoning
+      // 思考内容回传（DeepSeek 思考模式+工具调用必需）：
+      // 同时携带 reasoning_content 与 thinking 两种字段名 —— 不同网关/模型版本
+      // 要求的字段名不同（旧版认 reasoning_content，v4 思考模式按 thinking 校验），
+      // 宽松网关忽略不认的字段；严格拒绝时渲染层有自动去字段重试兜底
+      if (reasoningBack && m.reasoning) {
+        msg.reasoning_content = m.reasoning
+        msg.thinking = m.reasoning
+      }
       if (toolCalls.length) msg.tool_calls = toolCalls
       out.push(msg)
       for (const tc of m.toolCalls || []) {

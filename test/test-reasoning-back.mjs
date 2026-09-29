@@ -34,7 +34,8 @@ const history = [
   ok(out[0].role === 'system' && out[0].content === '系统提示', 'system 消息在首位')
   ok(out[1].role === 'user' && out[1].content === '看下磁盘', 'user 消息原样')
   const a1 = out[2]
-  ok(a1.role === 'assistant' && a1.reasoning_content === '用户想看磁盘，我应该先跑 df -h', 'assistant 思考内容已回传')
+  ok(a1.role === 'assistant' && a1.reasoning_content === '用户想看磁盘，我应该先跑 df -h', 'assistant 思考内容已回传（reasoning_content）')
+  ok(a1.thinking === a1.reasoning_content, '思考内容同时以 thinking 字段回传（DeepSeek v4 校验字段）')
   ok(a1.tool_calls?.[0]?.function?.name === 'run_command', 'tool_calls 保留')
   ok(out[3].role === 'tool' && out[3].tool_call_id === 'call_1', '工具结果消息紧随其后')
   const a2 = out[4]
@@ -158,6 +159,38 @@ console.log('ai-proxy 转发保真（DeepSeek 场景模拟）')
   // 先强断 keep-alive，等 server 关闭完成，再用 exitCode 自然退出（同 test-reasoning.js）
   server.closeAllConnections()
   await new Promise((r) => server.close(r))
+
+  // ---- delta.thinking 字段识别（DeepSeek v4 思考模式流式字段） ----
+  console.log('delta.thinking 字段识别')
+  {
+    const line = (obj) => `data: ${JSON.stringify(obj)}\n\n`
+    const s2 = http.createServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+      res.end(
+        line({ choices: [{ delta: { thinking: '想一' } }] }) +
+        line({ choices: [{ delta: { thinking: '下' } }] }) +
+        line({ choices: [{ delta: { content: '答案' } }] }) +
+        'data: [DONE]\n\n'
+      )
+    })
+    await new Promise((r) => s2.listen(0, '127.0.0.1', r))
+    const deltas = []
+    await new Promise((resolve) => {
+      proxy.chatStream({
+        eventId: 'rb4',
+        provider: { protocol: 'openai', baseUrl: `http://127.0.0.1:${s2.address().port}`, apiKey: 'k', model: 'm' },
+        body: { messages: [{ role: 'user', content: 'hi' }] }
+      }, (type, data) => {
+        if (type === 'delta') deltas.push(data)
+        if (type === 'done' || type === 'error') resolve()
+      })
+    })
+    ok(deltas.filter((d) => d.reasoning).map((d) => d.reasoning).join('') === '想一下', 'delta.thinking 被识别为思考增量')
+    ok(deltas.some((d) => d.content === '答案'), '正文增量不受影响')
+    s2.closeAllConnections()
+    await new Promise((r) => s2.close(r))
+  }
+
   console.log(`\n结果：${passed} 通过，${failed} 失败`)
   process.exitCode = failed ? 1 : 0
 }

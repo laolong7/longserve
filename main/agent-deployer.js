@@ -51,36 +51,39 @@ class AgentDeployer {
     this.sftpProvider = sftpManager
   }
 
-  // 部署。opts: { connId, instance, aiProvider, port, onStep(msg) }
+  // 部署。opts: { connId, instance, aiProvider, port, onStep(progress) }
+  // progress: { phase, percent, msg }（percent: 0-100 总进度，上传阶段按实际传输映射）
   // aiProvider: 桌面端 AI 配置 { name, protocol, baseUrl, apiKey, model, reasoningBack }
+  // 步骤刻意排序：小命令（配置/unit）在连接最健康时先做完，大体积上传放中间，
+  // 最后只留启动+健康检查——避免 100MB+ 上传后连接劣化导致关键步骤超时
   async deploy(app, opts) {
     const { connId, instance, aiProvider, port = PORT_DEFAULT, onStep = () => {} } = opts
+    const report = (phase, percent, msg) => onStep({ phase, percent, msg })
     const ssh = {
-      exec: (cmd, timeout) => this.ssh.exec(connId, cmd, timeout)
+      exec: async (cmd, timeout) => {
+        // 大文件上传后 SSH 通道可能瞬时不稳：exec 失败自动重试一次
+        const r = await this.ssh.exec(connId, cmd, timeout)
+        if (r.ok) return r
+        await new Promise((res) => setTimeout(res, 800))
+        return this.ssh.exec(connId, cmd, timeout)
+      }
     }
 
     // 0. 本地二进制检查
-    onStep('检查 Agent 程序包…')
+    report('check', 3, '检查 Agent 程序包…')
     const bin = agentBinaryPath(app)
     if (!fs.existsSync(bin)) throw new Error('未找到 Agent 程序包（agent/release/longserve-agent），请先构建：node agent/build.mjs')
     const binSize = fs.statSync(bin).size
 
     // 1. 端口预检（ss 不存在则跳过，失败靠启动阶段暴露）
-    onStep('检测端口占用…')
+    report('check', 6, '检测端口占用…')
     const portBusy = await this.checkPort(ssh, port)
     if (portBusy) throw new Error(`端口 ${port} 已被占用，请换一个端口再部署`)
 
-    // 2. 上传二进制
-    onStep(`上传 Agent 程序包（${(binSize / 1048576).toFixed(1)} MB，视网速约需几十秒）…`)
+    // 2. 生成 token 与配置（纯本地，快）
+    report('config', 10, '生成配置（token + AI 密钥）…')
     const sftp = await this.getSftp(connId)
-    await this.mkdirpRemote(sftp, REMOTE_DIR)
-    await this.putFile(sftp, bin, REMOTE_DIR + '/longserve-agent', (p) => {
-      if (p.percent % 10 === 0) onStep(`上传中 ${p.percent}%…`)
-    })
-    await ssh.exec(`chmod +x ${shQuote(REMOTE_DIR + '/longserve-agent')}`, 10000)
-
-    // 3. 配置注入（保留已有 token：重部署手机不用重新扫码）
-    onStep('写入配置（token + AI 密钥）…')
+    await this.mkdirpRemote(sftp, REMOTE_DIR + '/data')
     const existing = await readRemoteFile(ssh, REMOTE_DIR + '/data/config.json')
     const token = existing && existing.token ? existing.token : crypto.randomBytes(24).toString('hex')
     const config = {
@@ -100,8 +103,8 @@ class AgentDeployer {
     await writeRemoteFile(ssh, REMOTE_DIR + '/data/config.json', JSON.stringify(config, null, 2))
     await ssh.exec(`chmod 600 ${shQuote(REMOTE_DIR + '/data/config.json')}`, 10000)
 
-    // 4. systemd 常驻
-    onStep('注册 systemd 服务…')
+    // 3. systemd unit 先注册好（启动时二进制已就位即可生效）
+    report('config', 14, '注册 systemd 服务…')
     const unit = [
       '[Unit]',
       'Description=Longserve Agent (mobile console)',
@@ -114,31 +117,45 @@ class AgentDeployer {
       `ExecStart=${REMOTE_DIR}/longserve-agent --port=${config.port}`,
       'Restart=always',
       'RestartSec=5',
-      '# 硬化：只保留运行所需权限',
       'NoNewPrivileges=true',
       '',
       '[Install]',
       'WantedBy=multi-user.target'
     ].join('\n')
     await writeRemoteFile(ssh, '/etc/systemd/system/' + SERVICE + '.service', unit)
-    const up = await ssh.exec(`systemctl daemon-reload && systemctl enable --now ${SERVICE}`, 20000)
+    await ssh.exec('systemctl daemon-reload', 15000)
+
+    // 4. 上传二进制（最大耗时步骤，进度条主体）
+    report('upload', 15, `上传 Agent 程序包（${(binSize / 1048576).toFixed(1)} MB）…`)
+    await this.putFile(sftp, bin, REMOTE_DIR + '/longserve-agent', (p) => {
+      report('upload', 15 + Math.floor((p.percent / 100) * 70), `上传中 ${p.percent}%`)
+    })
+    report('upload', 86, '上传完成，设置执行权限…')
+    // 关键：立即释放 sftp 子系统。部分服务器 sshd MaxSessions 收得很紧（1-2），
+    // sftp 通道不关，后续 exec 会被卡到超时（实测踩坑：写入配置阶段命令超时）
+    this.sftpProvider.dropCache(connId)
+    await ssh.exec(`chmod +x ${shQuote(REMOTE_DIR + '/longserve-agent')}`, 15000)
+
+    // 5. 启动服务
+    report('service', 90, '启动 Agent 服务…')
+    const up = await ssh.exec(`systemctl enable --now ${SERVICE} && systemctl restart ${SERVICE}`, 25000)
     if (!up.ok || up.code !== 0) {
       throw new Error('systemd 启动失败：' + (up.stdout || up.error || '未知错误') + '（老系统无 systemd 时不支持自动部署）')
     }
 
-    // 5. 防火墙放行（best effort，失败不阻塞——云安全组需用户自行放行）
-    onStep('放行本机防火墙端口…')
+    // 6. 防火墙放行（best effort，失败不阻塞——云安全组需用户自行放行）
+    report('service', 94, '放行本机防火墙端口…')
     await this.openFirewall(ssh, config.port)
 
-    // 6. 健康检查
-    onStep('健康检查…')
+    // 7. 健康检查
+    report('health', 97, '健康检查…')
     const healthy = await this.waitHealthy(ssh, config.port, 15)
     if (!healthy) {
-      const logs = await ssh.exec(`journalctl -u ${SERVICE} -n 20 --no-pager 2>/dev/null || echo '（无法读取日志）'`, 10000)
+      const logs = await ssh.exec(`journalctl -u ${SERVICE} -n 20 --no-pager 2>/dev/null || echo '（无法读取日志）'`, 15000)
       throw new Error('Agent 启动后未响应健康检查。最近日志：\n' + (logs.stdout || '').slice(-1500))
     }
 
-    onStep('部署完成 ✓')
+    report('done', 100, '部署完成 ✓')
     return { host: instance.host, port: config.port, token }
   }
 

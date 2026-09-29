@@ -12,9 +12,14 @@
         <div class="tn-body">
           <!-- 已建隧道列表 -->
           <div class="tn-list-wrap">
-            <div class="tn-sec">已建立的转发</div>
+            <div class="tn-sec">已建立的转发 <span class="faint" style="font-weight:400">（每 3 秒自动刷新监听状态）</span></div>
             <div v-if="!list.length" class="faint" style="padding:10px 0; font-size:12px">暂无转发规则</div>
             <div v-for="t in list" :key="t.tunnelId" class="tn-item">
+              <span
+                class="live-dot"
+                :class="dotClass(t)"
+                :title="dotTitle(t)"
+              ></span>
               <span class="tn-kind" :class="t.type">{{ t.type === 'local' ? '本地' : '远程' }}</span>
               <span class="mono tn-path">
                 <template v-if="t.type === 'local'">
@@ -24,6 +29,7 @@
                   服务器 {{ t.bindHost || '0.0.0.0' }}:{{ t.bindPort }} → 本机 {{ t.targetHost }}:{{ t.targetPort }}
                 </template>
               </span>
+              <span class="mono tn-state" :class="dotClass(t)">{{ stateText(t) }}</span>
               <button class="ghost btn-xs" @click="stopOne(t)">停止</button>
             </div>
           </div>
@@ -69,7 +75,7 @@
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
+import { reactive, ref, onUnmounted } from 'vue'
 import { useDialogStore } from '../stores/dialog'
 
 const dialog = useDialogStore()
@@ -77,6 +83,10 @@ const visible = ref(false)
 const connId = ref(null)
 const tabName = ref('')
 const list = ref([])
+// 远程转发服务器侧监听状态：tunnelId -> true/false/null（检测中/无法检测）
+const remoteState = reactive({})
+let pollTimer = null
+let unsubStopped = null
 
 const form = reactive({
   type: 'local',
@@ -97,14 +107,62 @@ async function open(tab) {
   tabName.value = `${tab.name}（${tab.instance.host}）`
   visible.value = true
   await refresh()
+  // 转发断开/新建都要即时反映到列表
+  clearInterval(pollTimer)
+  pollTimer = setInterval(refresh, 3000)
+  if (unsubStopped) unsubStopped()
+  unsubStopped = window.api.on('tunnel:stopped', () => refresh())
 }
 function close() {
   visible.value = false
+  clearInterval(pollTimer)
+  if (unsubStopped) { unsubStopped(); unsubStopped = null }
 }
+onUnmounted(() => {
+  clearInterval(pollTimer)
+  if (unsubStopped) unsubStopped()
+})
 defineExpose({ open })
 
 async function refresh() {
-  list.value = await window.api.tunnelList(connId.value)
+  if (!visible.value) return
+  const arr = await window.api.tunnelList(connId.value)
+  list.value = arr
+  // 远程转发的服务器侧监听检测（逐条异步查，结果落 remoteState）
+  for (const t of arr) {
+    if (t.type !== 'remote') continue
+    const port = Number(t.bindPort)
+    if (!port || remoteState[t.tunnelId + ':' + port] !== undefined) continue
+    const key = t.tunnelId + ':' + port
+    window.api.tunnelCheckRemote(connId.value, port).then((r) => {
+      remoteState[key] = r.ok ? r.listening : null
+      // 触发响应式更新（直接赋值 reactive 键即响应）
+    })
+  }
+}
+
+function remoteListening(t) {
+  return remoteState[t.tunnelId + ':' + Number(t.bindPort)]
+}
+function dotClass(t) {
+  if (t.type === 'local') return t.listening ? 'ok' : 'bad'
+  const v = remoteListening(t)
+  if (v === undefined || v === null) return 'unknown'
+  return v ? 'ok' : 'bad'
+}
+function stateText(t) {
+  if (t.type === 'local') return t.listening ? '监听中' : '未监听'
+  const v = remoteListening(t)
+  if (v === undefined || v === null) return '检测中…'
+  return v ? '服务器已监听' : '服务器未监听'
+}
+function dotTitle(t) {
+  if (t.type === 'local') {
+    return t.listening ? '本机端口正在监听，转发生效中' : '本机端口未监听（可能创建失败或已失效）'
+  }
+  const v = remoteListening(t)
+  if (v === undefined || v === null) return '正在检测服务器侧监听状态'
+  return v ? '服务器端口正在监听，转发生效中' : '服务器端口未监听（防火墙拦截或程序未占用）'
 }
 async function add() {
   const f = form
@@ -168,6 +226,25 @@ async function stopOne(t) {
 .tn-kind.local { background: var(--green-dim); color: var(--green); }
 .tn-kind.remote { background: var(--blue-dim); color: var(--blue); }
 .tn-path { flex: 1; min-width: 0; font-size: 11.5px; word-break: break-all; }
+.tn-state { font-size: 10.5px; flex-shrink: 0; }
+.tn-state.ok { color: var(--green); }
+.tn-state.bad { color: var(--red); }
+.tn-state.unknown { color: var(--amber); }
+/* 监听状态呼吸灯：绿=生效 红=失效 琥珀=检测中 */
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--bg3);
+}
+.live-dot.ok { background: var(--green); box-shadow: 0 0 7px var(--green); animation: breathe 2.2s ease-in-out infinite; }
+.live-dot.bad { background: var(--red); box-shadow: 0 0 7px var(--red); }
+.live-dot.unknown { background: var(--amber); animation: breathe 1s ease-in-out infinite; }
+@keyframes breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
 .btn-xs { font-size: 11px; padding: 2px 8px; flex-shrink: 0; }
 .tn-type { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
 .tn-type label {

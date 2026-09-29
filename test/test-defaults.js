@@ -52,16 +52,18 @@ function readCfgFile() {
   return JSON.parse(fs.readFileSync(path.join(userDataDir, 'config.json'), 'utf8'))
 }
 
-console.log('场景 1：首次启动全量注入 5 技能 + 4 流水线，并落盘版本标记')
+console.log('场景 1：首次启动全量注入 4 技能 + 3 流水线（v3 无学子急事通），并落盘版本标记')
 {
   const store = freshStore()
   store.init(fakeApp)
   const cfg = store.load()
-  ok(cfg.skills.filter((s) => String(s.id).startsWith('sk_preset_')).length === 5, '注入 5 个预设技能')
-  ok(cfg.pipelines.filter((p) => String(p.id).startsWith('pl_preset_')).length === 4, '注入 4 条预设流水线')
-  ok(cfg.defaultsVersion === 2, '内存标记 defaultsVersion=2')
+  ok(cfg.skills.filter((s) => String(s.id).startsWith('sk_preset_')).length === 4, '注入 4 个预设技能')
+  ok(cfg.pipelines.filter((p) => String(p.id).startsWith('pl_preset_')).length === 3, '注入 3 条预设流水线')
+  ok(!cfg.skills.some((s) => s.id === 'sk_preset_deploy'), '不含「部署学子急事通」技能（牢笼个人项目不该做默认）')
+  ok(!cfg.pipelines.some((p) => p.id === 'pl_preset_deploy'), '不含「学子急事通发布」流水线')
+  ok(cfg.defaultsVersion === 3, '内存标记 defaultsVersion=3')
   const onDisk = readCfgFile()
-  ok(onDisk.defaultsVersion === 2, '版本标记已落盘（删除预设后不会被回填复活）')
+  ok(onDisk.defaultsVersion === 3, '版本标记已落盘（删除预设后不会被回填复活）')
   ok(onDisk.pipelines.some((p) => p.id === 'pl_preset_nginx'), '含新增的 nginx 变更发布流水线')
   ok(onDisk.pipelines.some((p) => p.id === 'pl_preset_trouble'), '含新增的服务故障排查流水线')
 }
@@ -84,9 +86,9 @@ console.log('场景 2：老配置（无版本标记）一次性回填缺失预�
   const cfg = store.load()
   ok(cfg.skills.some((s) => s.id === 'sk_custom'), '自定义技能保留')
   ok(cfg.skills.find((s) => s.id === 'sk_preset_health').name === '服务器体检（用户改过名）', '用户改过的预设不被覆盖')
-  ok(cfg.skills.filter((s) => String(s.id).startsWith('sk_preset_')).length === 5, '缺失的预设技能补齐到 5 个')
-  ok(cfg.pipelines.filter((p) => String(p.id).startsWith('pl_preset_')).length === 4, '流水线补齐到 4 条')
-  ok(Number(readCfgFile().defaultsVersion) === 2, '回填后落盘版本标记')
+  ok(cfg.skills.filter((s) => String(s.id).startsWith('sk_preset_')).length === 4, '缺失的预设技能补齐到 4 个')
+  ok(cfg.pipelines.filter((p) => String(p.id).startsWith('pl_preset_')).length === 3, '流水线补齐到 3 条')
+  ok(Number(readCfgFile().defaultsVersion) === 3, '回填后落盘版本标记')
 }
 
 console.log('场景 3：版本标记已写入后，删除预设重启不复活')
@@ -101,7 +103,35 @@ console.log('场景 3：版本标记已写入后，删除预设重启不复活')
   store2.init(fakeApp)
   const cfg2 = store2.load()
   ok(!cfg2.skills.some((s) => s.id === 'sk_preset_nginx'), '已删的预设不会复活')
-  ok(cfg2.defaultsVersion === 2, '版本标记仍在')
+  ok(cfg2.defaultsVersion === 3, '版本标记仍在')
+}
+
+console.log('场景 5：v2 旧配置（含学子急事通预设）升级 → 退役清理 + 补齐新预设')
+{
+  userDataDir = path.join(tmp, 'userData3')
+  fs.mkdirSync(userDataDir, { recursive: true })
+  fs.writeFileSync(path.join(userDataDir, 'config.json'), JSON.stringify({
+    instances: [],
+    aiProviders: [],
+    defaultsVersion: 2,
+    skills: [
+      { id: 'sk_custom', name: '我的技能', content: 'x', enabled: true },
+      { id: 'sk_preset_health', name: '服务器体检', content: 'y', enabled: true },
+      { id: 'sk_preset_deploy', name: '部署学子急事通', content: 'z', enabled: true }
+    ],
+    pipelines: [
+      { id: 'pl_preset_deploy', name: '学子急事通发布', steps: [{ skillId: 'sk_preset_deploy', checkpoint: true }] },
+      { id: 'pl_custom', name: '我的流水线', steps: [{ skillId: 'sk_custom', checkpoint: true }] }
+    ]
+  }), 'utf8')
+  const store = freshStore()
+  store.init(fakeApp)
+  const cfg = store.load()
+  ok(!cfg.skills.some((s) => s.id === 'sk_preset_deploy'), 'v2 配置里的学子急事通技能已退役删除')
+  ok(!cfg.pipelines.some((p) => p.id === 'pl_preset_deploy'), 'v2 配置里的学子急事通流水线已退役删除')
+  ok(cfg.pipelines.some((p) => p.id === 'pl_custom' && p.steps.length === 1), '用户自定义流水线保留')
+  ok(cfg.skills.some((s) => s.id === 'sk_preset_nginx'), '缺失的新预设照常补齐')
+  ok(cfg.defaultsVersion === 3, '迁移后版本标记升到 3')
 }
 
 console.log('场景 4：渲染层保存（带 defaultsVersion）后同样不复活')

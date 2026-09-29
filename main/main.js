@@ -167,6 +167,11 @@ function registerIpc() {
   })
   ipcMain.on('tunnel:stop', (_e, tunnelId) => sshManager.stopTunnel(tunnelId))
   ipcMain.handle('tunnel:list', (_e, connId) => sshManager.listTunnels(connId))
+  // 远程转发是否真实生效：服务器侧 ss 检测监听端口
+  ipcMain.handle('tunnel:check-remote', async (_e, connId, port) => {
+    try { return { ok: true, listening: await sshManager.checkRemoteListen(connId, port) } }
+    catch (err) { return { ok: false, error: err.message } }
+  })
 
   // ---------- 会话录制 ----------
   ipcMain.handle('recordings:default-dir', () => {
