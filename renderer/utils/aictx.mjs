@@ -32,7 +32,14 @@ export function buildOpenAiMessages(recentMsgs, systemContent, { reasoningBack =
         msg.reasoning_content = m.reasoning
         msg.thinking = m.reasoning
       }
-      if (toolCalls.length) msg.tool_calls = toolCalls
+      if (toolCalls.length) {
+        msg.tool_calls = toolCalls
+      } else if (!m.content) {
+        // 只输出思考、正文为空且未调工具的轮次（DeepSeek 思考模式偶发）：
+        // content/tool_calls 双空会被 DeepSeek 拒绝（Invalid assistant message），
+        // 用空格占位保住这条消息的思考回传
+        msg.content = ' '
+      }
       out.push(msg)
       for (const tc of m.toolCalls || []) {
         out.push({ role: 'tool', tool_call_id: tc.id, content: tc.result || '' })

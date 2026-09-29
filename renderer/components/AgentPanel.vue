@@ -40,8 +40,8 @@
           <label>使用的 AI 配置（Agent 在服务器上直接调用它，密钥会写入服务器配置文件）</label>
           <select v-model="form.aiProviderId">
             <option value="" disabled>选择 AI 配置…</option>
-            <option v-for="p in config.aiProviders" :key="p.id" :value="p.id" :disabled="p.protocol === 'anthropic'">
-              {{ p.name }}（{{ p.model || '未设模型' }}）{{ p.protocol === 'anthropic' ? ' — 手机控制暂不支持' : '' }}
+            <option v-for="p in config.aiProviders" :key="p.id" :value="p.id">
+              {{ p.name }}（{{ p.model || '未设模型' }}）
             </option>
           </select>
         </div>
@@ -224,10 +224,6 @@ async function deploy() {
   const provider = config.aiProviders.find((p) => p.id === form.value.aiProviderId)
   const conn = connOf(form.value.instanceId)
   if (!inst || !provider || !conn) return
-  if (provider.protocol === 'anthropic') {
-    deployError.value = '手机控制暂不支持 Anthropic 原生协议的 AI 配置，请选择 OpenAI 兼容配置'
-    return
-  }
   deploying.value = true
   deployError.value = ''
   progress.phase = 'check'

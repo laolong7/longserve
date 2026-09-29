@@ -59,6 +59,15 @@ const history = [
   ok(!('reasoning_content' in out[1]), '空思考内容不加字段')
 }
 
+{
+  // 只思考无正文无工具的轮次：占位空格防 DeepSeek「content or tool_calls must be set」
+  const out = buildOpenAiMessages([{ role: 'assistant', content: '', reasoning: '只想了没说话' }], 's', {})
+  ok(out[1].content === ' ' && out[1].reasoning_content === '只想了没说话', '思考-only 轮次正文占位空格')
+  // 有 tool_calls 时正文可以保持 null
+  const out2 = buildOpenAiMessages([{ role: 'assistant', content: '', toolCalls: [{ id: 'c', name: 'f', argsJson: '{}' }] }], 's', {})
+  ok(out2[1].content === null && out2[1].tool_calls.length === 1, '工具轮次正文 null 合法')
+}
+
 console.log('报错识别正则')
 {
   ok(REASONING_ERR_RE.test('content[].thinking in the thinking mode must be passed back to the API'), 'DeepSeek 原文报错命中')

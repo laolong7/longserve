@@ -164,6 +164,132 @@ function mockStream(messages, handlers, signal) {
   })
 }
 
+// ---------- Anthropic 原生协议适配 ----------
+// 存储统一为 OpenAI 风格（含 reasoning_content/thinking），仅请求时按协议转换；
+// Anthropic 侧不做思考回传（thinking block 需要 signature，多轮不携带是允许的）
+
+// OpenAI 风格 messages -> Anthropic 风格（system 提顶层、tool 转块、连续 user 合并）
+function toAnthropicMessages(openAiMessages) {
+  let system
+  const out = []
+  for (const m of openAiMessages) {
+    if (m.role === 'system') {
+      system = system ? system + '\n\n' + m.content : m.content
+      continue
+    }
+    if (m.role === 'user') {
+      const last = out[out.length - 1]
+      if (last && last.role === 'user' && typeof last.content === 'string' && typeof m.content === 'string') {
+        last.content += '\n\n' + m.content
+      } else {
+        out.push({ role: 'user', content: m.content })
+      }
+    } else if (m.role === 'assistant') {
+      const content = []
+      if (m.content) content.push({ type: 'text', text: m.content })
+      for (const tc of m.tool_calls || []) {
+        let input = {}
+        try { input = JSON.parse(tc.function.arguments || '{}') } catch { /* 空参数 */ }
+        content.push({ type: 'tool_use', id: tc.id, name: tc.function.name, input })
+      }
+      out.push({ role: 'assistant', content: content.length ? content : [{ type: 'text', text: '（空）' }] })
+    } else if (m.role === 'tool') {
+      const block = { type: 'tool_result', tool_use_id: m.tool_call_id, content: m.content || '' }
+      const last = out[out.length - 1]
+      if (last && last.role === 'user' && Array.isArray(last.content) && last.content[0] && last.content[0].type === 'tool_result') {
+        last.content.push(block)
+      } else {
+        out.push({ role: 'user', content: [block] })
+      }
+    }
+  }
+  return { system, messages: out }
+}
+
+async function anthropicStream(ai, messages, handlers, signal) {
+  let base = (ai.baseUrl || '').trim().replace(/\/+$/, '')
+  if (!base) throw new Error('AI 配置缺少请求地址（baseUrl）')
+  if (!base.endsWith('/messages')) base += '/v1/messages'
+
+  const { system, messages: am } = toAnthropicMessages(messages)
+  const payload = {
+    model: ai.model,
+    max_tokens: Number(ai.maxTokens) || 8192,
+    stream: true,
+    messages: am
+  }
+  if (system) payload.system = system
+  payload.tools = TOOLS.map((t) => ({
+    name: t.function.name,
+    description: t.function.description,
+    input_schema: t.function.parameters
+  }))
+
+  const res = await fetch(base, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${ai.apiKey || ''}`,
+      'x-api-key': ai.apiKey || '',
+      'anthropic-version': '2023-06-01'
+    },
+    body: JSON.stringify(payload),
+    signal
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    let msg = `AI 请求失败（HTTP ${res.status}）`
+    try { msg = JSON.parse(text).error?.message || msg } catch { if (text) msg += '：' + text.slice(0, 200) }
+    throw new Error(msg)
+  }
+
+  const ct = res.headers.get('content-type') || ''
+  if (ct.includes('application/json')) {
+    const j = await res.json()
+    if (j.error) throw new Error(j.error.message || String(j.error))
+    let idx = 0
+    for (const block of j.content || []) {
+      if (block.type === 'text' && block.text) handlers.onDelta(block.text)
+      else if (block.type === 'tool_use') {
+        handlers.onToolCall({ index: idx++, id: block.id, name: block.name, argsFragment: JSON.stringify(block.input || {}) })
+      }
+    }
+    return
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    let nl
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim()
+      buf = buf.slice(nl + 1)
+      if (!line.startsWith('data:')) continue
+      const payloadStr = line.slice(5).trim()
+      if (!payloadStr) continue
+      let ev
+      try { ev = JSON.parse(payloadStr) } catch { continue }
+
+      if (ev.type === 'content_block_start' && ev.content_block && ev.content_block.type === 'tool_use') {
+        handlers.onToolCall({ index: ev.index, id: ev.content_block.id, name: ev.content_block.name, argsFragment: '' })
+      } else if (ev.type === 'content_block_delta' && ev.delta) {
+        if (ev.delta.type === 'text_delta' && ev.delta.text) handlers.onDelta(ev.delta.text)
+        else if (ev.delta.type === 'input_json_delta' && ev.delta.partial_json) {
+          handlers.onToolCall({ index: ev.index, argsFragment: ev.delta.partial_json })
+        }
+      } else if (ev.type === 'message_stop') {
+        return
+      } else if (ev.type === 'error') {
+        throw new Error((ev.error && ev.error.message) || 'Anthropic 流错误')
+      }
+    }
+  }
+}
+
 // ---------- OpenAI 兼容流式请求 ----------
 // onDelta/onReasoning 增量回调；onToolCall 增量聚合（index/id/name/argsFragment）
 async function openaiStream(ai, messages, handlers, signal) {
@@ -260,7 +386,10 @@ async function runChat(text, emit, signal) {
   }
 
   const messages = store.loadChat()
-  if (!messages.length) messages.push({ role: 'system', content: systemPrompt() })
+  // system 提示始终保持在首位（历史按条数裁剪时可能把开头的 system 切掉）
+  if (!messages.length || messages[0].role !== 'system') {
+    messages.unshift({ role: 'system', content: systemPrompt() })
+  }
   messages.push({ role: 'user', content: text })
 
   try {
@@ -282,6 +411,7 @@ async function runChat(text, emit, signal) {
       }
 
       if (ai.mock) await mockStream(messages, handlers, signal)
+      else if (ai.protocol === 'anthropic') await anthropicStream(ai, messages, handlers, signal)
       else await openaiStream(ai, messages, handlers, signal)
 
       // 组装 assistant 消息：思考内容必须随消息保存并回传（DeepSeek 强制要求）。
@@ -296,7 +426,12 @@ async function runChat(text, emit, signal) {
         type: 'function',
         function: { name: c.name, arguments: c.argsJson || '{}' }
       }))
-      if (calls.length) assistant.tool_calls = calls
+      if (calls.length) {
+        assistant.tool_calls = calls
+      } else if (!content) {
+        // 只思考无正文无工具的轮次：双空会被 DeepSeek 拒（Invalid assistant message）
+        assistant.content = ' '
+      }
       messages.push(assistant)
 
       if (!calls.length) break // 纯回复，循环结束

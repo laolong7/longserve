@@ -192,10 +192,64 @@ console.log('HTTP API 全链路（含 SSE）')
 
   child.kill()
   await new Promise((r) => setTimeout(r, 300))
+
+  await testAnthropicConvert()
 }
 
 }
 
 // 收尾：临时数据目录在系统 tmp，不必手动清理
+
+// ---------- 单元：Anthropic 协议消息转换（定义于顶层，main 内 await 调用） ----------
+async function testAnthropicConvert() {
+  console.log('Anthropic 协议转换')
+  {
+    const aiMod = require('../agent/src/ai.js')
+  // toAnthropicMessages 未导出，通过 mock 协议请求间接验证：
+  // mock Anthropic 端点收 body 断言转换正确性
+  const store = require('../agent/src/store')
+  const tmpData2 = fs.mkdtempSync(path.join(os.tmpdir(), 'lagent-ant-'))
+  store.init(tmpData2)
+  store.saveConfig({ token: 't', port: 1, ai: { protocol: 'anthropic', baseUrl: 'http://127.0.0.1:0', apiKey: 'k', model: 'm' }, createdAt: 1 })
+
+  // 直接测转换：借助 anthropicStream 的前置转换逻辑，用本地 mock 服务器
+  const http2 = require('http')
+  const server = http2.createServer((req, res) => {
+    let buf = ''
+    req.on('data', (d) => (buf += d))
+    req.on('end', () => {
+      const body = JSON.parse(buf)
+      ;(async () => {
+        ok(body.model === 'm' && body.max_tokens === 8192, 'Anthropic 请求体：model/max_tokens')
+        ok(typeof body.system === 'string' && body.system.includes('运维助手'), 'system 提到顶层（历史裁剪后也不丢）')
+        const asst = body.messages.find((m) => m.role === 'assistant')
+        ok(Array.isArray(asst.content) && asst.content[0].type === 'tool_use' && asst.content[0].input.command === 'df -h', 'tool_calls 转 tool_use 块')
+        const userMsg = body.messages.find((m) => m.role === 'user' && Array.isArray(m.content))
+        ok(userMsg && userMsg.content[0].type === 'tool_result', 'tool 结果转 tool_result 块')
+        ok(body.tools && body.tools[0].name === 'run_command' && !!body.tools[0].input_schema, '工具定义转 input_schema')
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ content: [{ type: 'text', text: 'anthropic-ok' }] }))
+      })()
+    })
+  })
+  const aiMod2 = aiMod // mock 服务器跑一次真实 runChat（anthropic 协议）
+  await new Promise((r) => server.listen(0, '127.0.0.1', r))
+  // 端口写回 baseUrl
+  const cfg2 = store.loadConfig()
+  cfg2.ai.baseUrl = `http://127.0.0.1:${server.address().port}`
+  store.saveConfig(cfg2)
+  // 预置带工具调用的历史（验证 OpenAI 风格存储 → Anthropic 块结构转换）
+  store.saveChat([
+    { role: 'user', content: '看下磁盘' },
+    { role: 'assistant', content: null, tool_calls: [{ id: 'c1', type: 'function', function: { name: 'run_command', arguments: '{"command":"df -h"}' } }] },
+    { role: 'tool', tool_call_id: 'c1', content: 'ok' }
+  ])
+  const evts = []
+  await aiMod2.runChat('看下磁盘', (e) => evts.push(e), null)
+  ok(evts.some((e) => e.type === 'delta' && e.text === 'anthropic-ok'), 'Anthropic 非流式兜底返回正文')
+  server.close()
+  }
+}
+
 console.log(`\n结果：${passed} 通过，${failed} 失败`)
 process.exitCode = failed ? 1 : 0
