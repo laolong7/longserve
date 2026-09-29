@@ -77,6 +77,10 @@ const server = new ssh2.Server(
           const done = (code) => { ch.exit(code); ch.close() }
           if (cmd === 'true' || cmd === ':') {
             done(0)
+          } else if (cmd.startsWith('ldd --version')) {
+            // glibc 预检：返回 2.17（边界值——glibc-217 构建的最低要求，恰好应通过）
+            ch.write('ldd (GNU libc) 2.17\n')
+            done(0)
           } else if (cmd.startsWith('ss -tln')) {
             // 端口预检（echo BUSY/FREE）与远程转发监听检测（echo YES/NO）：一律空闲
             ch.write(cmd.includes('echo BUSY') ? 'FREE\n' : 'NO\n')

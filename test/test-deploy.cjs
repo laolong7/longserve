@@ -12,7 +12,7 @@
 const path = require('path')
 const fs = require('fs')
 const { spawn } = require('child_process')
-const { makeExec, writeRemoteFile, readRemoteFile, AgentDeployer, agentBinaryPath } = require('../main/agent-deployer')
+const { makeExec, writeRemoteFile, readRemoteFile, parseGlibcVersion, AgentDeployer, agentBinaryPath } = require('../main/agent-deployer')
 
 let passed = 0
 let failed = 0
@@ -103,6 +103,21 @@ async function testRemoteFile() {
   ok(await readRemoteFile({ exec: async () => ({ ok: true, code: 0, stdout: 'not-json' }) }, '/x') === null, 'readRemoteFile 坏 JSON 返回 null')
 }
 
+// ---------- 单元：glibc 版本解析（v1.11.3 老系统兼容预检） ----------
+console.log('glibc 版本解析（parseGlibcVersion）')
+function testParseGlibc() {
+  const ubuntu = parseGlibcVersion('ldd (Ubuntu GLIBC 2.31-0ubuntu9.16) 2.31')
+  ok(ubuntu && ubuntu.musl === false && ubuntu.version === '2.31' && ubuntu.minor === 31, 'Ubuntu 新系统：2.31')
+  const centos7 = parseGlibcVersion('ldd (GNU libc) 2.17')
+  ok(centos7 && centos7.minor === 17, 'CentOS 7 边界值：2.17（glibc-217 最低要求，应识别通过）')
+  const ubuntu1804 = parseGlibcVersion('ldd (Ubuntu GLIBC 2.27-3ubuntu1.5) 2.27')
+  ok(ubuntu1804 && ubuntu1804.minor === 27, 'Ubuntu 18.04：2.27（< 2.28，官方构建跑不了、glibc-217 可跑）')
+  const musl = parseGlibcVersion('musl libc (x86_64)')
+  ok(musl && musl.musl === true, 'musl/Alpine 识别为不支持')
+  ok(parseGlibcVersion('some garbage output') === null, '无法解析返回 null（不阻塞部署）')
+  ok(parseGlibcVersion('') === null, '空输出返回 null')
+}
+
 // ---------- 集成：mock-ssh 全链路部署 ----------
 console.log('mock-ssh 全链路（部署→状态→换钥→卸载）')
 async function testFullDeploy() {
@@ -173,6 +188,7 @@ async function testFullDeploy() {
 ;(async () => {
   await testMakeExec()
   await testRemoteFile()
+  testParseGlibc()
   await testFullDeploy()
   console.log(`\n结果：${passed} 通过，${failed} 失败`)
   process.exitCode = failed ? 1 : 0

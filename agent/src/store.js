@@ -8,7 +8,7 @@
 const fs = require('fs')
 const path = require('path')
 
-const VERSION = '1.11.1'
+const VERSION = '1.11.3'
 
 let dataDir = null
 

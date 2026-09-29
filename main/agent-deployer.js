@@ -64,6 +64,17 @@ async function readRemoteFile(ssh, remotePath) {
   try { return JSON.parse(r.stdout) } catch { return null }
 }
 
+// 解析 `ldd --version` 首行，判断目标机 libc：
+//   glibc：'ldd (Ubuntu GLIBC 2.31-0ubuntu9.16) 2.31' / 'ldd (GNU libc) 2.17' → { musl:false, version:'2.31', minor:31 }
+//   musl：'musl libc (x86_64)' → { musl:true }（glibc 构建的二进制在 musl 上跑不了）
+//   解析不出 → null（不阻塞部署，交给启动阶段暴露）
+function parseGlibcVersion(line) {
+  if (/musl/i.test(line || '')) return { musl: true }
+  const m = (line || '').match(/(\d+)\.(\d+)/)
+  if (!m) return null
+  return { musl: false, version: m[1] + '.' + m[2], minor: Number(m[2]) }
+}
+
 class AgentDeployer {
   constructor(sshManager, sftpManager) {
     this.ssh = sshManager
@@ -85,6 +96,18 @@ class AgentDeployer {
     const bin = agentBinaryPath(app)
     if (!fs.existsSync(bin)) throw new Error('未找到 Agent 程序包（agent/release/longserve-agent），请先构建：node agent/build.mjs')
     const binSize = fs.statSync(bin).size
+
+    // 0.5 glibc 预检（v1.11.3：Agent 二进制为 glibc-217 构建，要求 glibc ≥ 2.17；
+    //     musl/Alpine 不支持。官方构建要求 ≥ 2.28 的坑在老系统上必现，提前拦住给明确报错）
+    report('check', 4, '检测系统 libc…')
+    const glibc = await this.checkGlibc(ssh)
+    if (glibc && glibc.musl) {
+      throw new Error('该服务器是 musl libc（Alpine 等），Agent 为 glibc 构建暂不支持部署到这类系统')
+    }
+    if (glibc && glibc.minor < 17) {
+      throw new Error(`该服务器 glibc ${glibc.version} 过老（Agent 需 ≥ 2.17，即 CentOS 7 / Debian 9 及之后），暂不支持部署`)
+    }
+    report('check', 5, glibc ? `glibc ${glibc.version} ✓` : 'libc 版本未识别（跳过预检）')
 
     // 1. 端口预检（ss 不存在则跳过，失败靠启动阶段暴露）
     report('check', 6, '检测端口占用…')
@@ -212,6 +235,13 @@ class AgentDeployer {
   }
 
   // ---------- 内部 ----------
+  // glibc 预检：失败/识别不出返回 null，不阻塞部署
+  async checkGlibc(ssh) {
+    const r = await ssh.exec('ldd --version 2>&1 | head -1', 8000)
+    if (!r.ok) return null
+    return parseGlibcVersion(String(r.stdout || '').split('\n')[0] || '')
+  }
+
   async checkPort(ssh, port) {
     const r = await ssh.exec(`ss -tln 2>/dev/null | grep -q ':${Number(port)} ' && echo BUSY || echo FREE`, 8000)
     if (!r.ok) return false // 探测失败当作空闲，交给启动阶段兜底
@@ -254,5 +284,5 @@ class AgentDeployer {
   }
 }
 
-// makeExec / writeRemoteFile / readRemoteFile 导出供契约测试使用
-module.exports = { AgentDeployer, agentBinaryPath, REMOTE_DIR, SERVICE, PORT_DEFAULT, makeExec, writeRemoteFile, readRemoteFile }
+// makeExec / writeRemoteFile / readRemoteFile / parseGlibcVersion 导出供契约测试使用
+module.exports = { AgentDeployer, agentBinaryPath, REMOTE_DIR, SERVICE, PORT_DEFAULT, makeExec, writeRemoteFile, readRemoteFile, parseGlibcVersion }
