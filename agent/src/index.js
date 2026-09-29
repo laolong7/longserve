@@ -183,6 +183,11 @@ async function handleApi(req, res, pathname, query) {
   if (pathname === '/api/pending' && req.method === 'GET') {
     return sendJson(res, 200, { ok: true, pending: execMod.listPending() })
   }
+  // ---- 中止正在执行的命令（控制台 ^C） ----
+  if (pathname === '/api/exec/abort' && req.method === 'POST') {
+    const n = execMod.abortRunning()
+    return sendJson(res, 200, { ok: true, aborted: n })
+  }
   if (pathname === '/api/confirm' && req.method === 'POST') {
     const body = await readBody(req)
     const ok = execMod.resolveConfirm(String(body.id || ''), !!body.approve)
@@ -249,6 +254,12 @@ function execTranscript(limit = 200) {
 const { checkDanger } = require('./danger')
 
 async function handleExec(req, res) {
+  // 鉴权与 handleApi 同款（安全补丁：此入口曾漏掉 token 校验，等于裸奔的命令执行）
+  const cfg = store.loadConfig()
+  if (!cfg || !cfg.token) return sendJson(res, 503, { error: 'Agent 尚未初始化（缺少配置），请从桌面端重新部署' })
+  const token = bearerToken(req) || ''
+  if (!token || token !== cfg.token) return sendJson(res, 401, { error: '未绑定或密钥无效，请重新扫码' })
+
   const body = await readBody(req)
   const command = String(body.command || '').trim()
   if (!command) return sendJson(res, 400, { error: '命令不能为空' })
@@ -264,7 +275,8 @@ async function handleExec(req, res) {
   }
   const r = await execMod.runShell(command)
   store.appendAudit({ time: Date.now(), source: 'manual', command, danger, code: r.code, output: execMod.summarize(r, 300) })
-  return sendJson(res, 200, { ok: true, code: r.code, output: execMod.summarize(r) })
+  const out = r.killed ? '※ 已中止（Ctrl+C）\n' + execMod.summarize(r) : execMod.summarize(r)
+  return sendJson(res, 200, { ok: true, code: r.code, killed: !!r.killed, output: out })
 }
 
 // ---------- 静态资源 ----------

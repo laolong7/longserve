@@ -12,11 +12,14 @@ const CONFIRM_TIMEOUT = 5 * 60 * 1000 // 确认等待超时：5 分钟自动拒�
 let confirmSeq = 0
 // confirmId -> { id, command, reasons, source, resolve, timer }
 const pending = new Map()
+// 正在跑的 shell 子进程（Ctrl+C 中止用）
+const running = new Set()
 
 // 执行 shell 命令（收集 stdout/stderr，限时）
 function runShell(cmd, timeout = 120000) {
   return new Promise((resolve) => {
-    childExec(cmd, { timeout, maxBuffer: 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
+    const child = childExec(cmd, { timeout, maxBuffer: 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
+      running.delete(child)
       // 非零退出码：err.code 携带码但 stdout 可能仍有有用输出，一并返回
       resolve({
         code: err ? (err.code != null ? err.code : -1) : 0,
@@ -25,7 +28,25 @@ function runShell(cmd, timeout = 120000) {
         killed: !!(err && err.killed)
       })
     })
+    // 立即关 stdin：交互式等输入的命令（mysql -p 这类密码提示）当场拿到 EOF，
+    // 不再挂到超时才报错（曾经要干等 2 分钟）
+    try { child.stdin.end() } catch { /* 已退出 */ }
+    running.add(child)
   })
+}
+
+// 中止正在执行的命令（控制台 ^C）：先 SIGINT 温柔打断，800ms 后仍活着就强杀
+function abortRunning() {
+  let n = 0
+  for (const child of running) {
+    n++
+    try { child.kill('SIGINT') } catch { /* 已退出 */ }
+    // 800ms 后仍没死透就强杀（SIGINT 发过 child.killed 就是 true，不能再拿它当存活判据）
+    setTimeout(() => {
+      try { child.kill('SIGKILL') } catch { /* 已退出 */ }
+    }, 800)
+  }
+  return n
 }
 
 // 输出摘要（审计与 AI 工具结果共用；太长的输出截断）
@@ -96,4 +117,4 @@ function listPending() {
   return [...pending.values()].map((p) => ({ id: p.id, command: p.command, reasons: p.reasons, source: p.source }))
 }
 
-module.exports = { requestExec, resolveConfirm, listPending, runShell, summarize }
+module.exports = { requestExec, resolveConfirm, listPending, runShell, summarize, abortRunning }

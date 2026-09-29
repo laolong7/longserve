@@ -51,6 +51,14 @@
           @keydown.down="historyNav(1)"
         />
       </div>
+      <!-- ^C：停掉当前正在跑的指令 -->
+      <button
+        class="ctrl-c-btn mono"
+        :class="{ live: running }"
+        :disabled="!running"
+        title="停止当前指令"
+        @click="abortRun"
+      >^C</button>
       <button class="send-btn" :disabled="running || !draft.trim()" @click="send">{{ running ? '…' : '↑' }}</button>
     </footer>
   </div>
@@ -152,6 +160,15 @@ function historyNav(dir) {
   draft.value = histIdx.value < 0 ? '' : localHistory.value[histIdx.value]
 }
 
+// ^C：中止当前正在执行的指令（agent 杀子进程，输出以「※ 已中止」收尾）
+async function abortRun() {
+  if (!running.value) return
+  try {
+    await api.execAbort()
+    pushLine('err', '^C')
+  } catch { /* 断线静默 */ }
+}
+
 // 粘贴：读剪贴板进输入框（多行合并为空格分隔的单条命令）
 async function pasteClip() {
   try {
@@ -250,4 +267,20 @@ onUnmounted(() => {})
 .dollar { color: var(--green); font-size: 13px; }
 .input-wrap input { flex: 1; border: none; background: transparent; padding: 10px 0; font-size: 13px; min-width: 0; }
 .send-btn { width: 38px; height: 38px; padding: 0; border-radius: 50%; font-size: 17px; flex-shrink: 0; }
+/* ^C 停止键：指令运行中亮红呼吸，闲置时灰暗 */
+.ctrl-c-btn {
+  width: 40px; height: 38px; padding: 0; flex-shrink: 0;
+  font-size: 13px; font-weight: 700;
+  color: var(--text-faint); border-radius: 8px;
+}
+.ctrl-c-btn.live {
+  color: var(--red);
+  border-color: rgba(242, 85, 90, 0.5);
+  background: var(--red-dim);
+  animation: cPulse 1s ease-in-out infinite;
+}
+@keyframes cPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
 </style>

@@ -293,8 +293,25 @@ async function loadServices() {
   svcError.value = ''
   try {
     const r = await api.services()
-    if (r.ok) svcAll.value = r.services || []
-    else svcError.value = r.error || '加载失败'
+    if (r.ok) {
+      const fresh = r.services || []
+      if (!svcAll.value.length) {
+        svcAll.value = fresh
+      } else {
+        // 就地合并：既有条目原位更新状态（停止的服务不跳走），消失的移除，新增的追加到末尾
+        const byName = new Map(fresh.map((s) => [s.unit, s]))
+        const merged = []
+        for (const s of svcAll.value) {
+          const cur = byName.get(s.unit)
+          if (cur) {
+            merged.push(cur)
+            byName.delete(s.unit)
+          }
+        }
+        for (const rest of byName.values()) merged.push(rest)
+        svcAll.value = merged
+      }
+    } else svcError.value = r.error || '加载失败'
   } catch (err) {
     svcError.value = '加载失败：' + (err.message || err)
   } finally {
@@ -307,8 +324,14 @@ async function svcAct(s, op) {
   if (!window.confirm(`确定${opText}服务 ${s.unit}？`)) return
   try {
     const r = await api.serviceAction(s.unit, op, true)
-    if (!r.ok) window.alert('操作失败：' + (r.error || '未知错误'))
-    else setTimeout(loadServices, 800) // 给 systemd 落定时间再刷新
+    if (!r.ok) {
+      window.alert('操作失败：' + (r.error || '未知错误'))
+      return
+    }
+    // 就地更新状态：条目留在原位，停止后变「关闭」并出现启动按钮（不整表重排）
+    s.active = op === 'stop' ? 'inactive' : 'active'
+    s.sub = op === 'stop' ? 'dead' : 'running'
+    if (op === 'start') s.desc = s.desc || '（已安装，未运行）'
   } catch (err) {
     window.alert('操作失败：' + (err.message || err))
   }

@@ -210,6 +210,20 @@ console.log('HTTP API 全链路（含 SSE）')
   const ex2 = await req('POST', '/api/exec', { command: 'rm -rf /tmp/whatever' })
   ok(JSON.parse(ex2.body).needConfirm === true, '手动危险命令返回 needConfirm')
 
+  // ^C 中止：跑长命令 → abort → killed 收场
+  const longRun = req('POST', '/api/exec', { command: 'node -e "setTimeout(function(){},30000)"' })
+  await new Promise((r) => setTimeout(r, 400))
+  const ab = await req('POST', '/api/exec/abort', {})
+  ok(JSON.parse(ab.body).ok === true && JSON.parse(ab.body).aborted >= 1, 'exec/abort 返回中止数量')
+  const lrBody = JSON.parse((await longRun).body)
+  ok(lrBody.killed === true || /已中止/.test(lrBody.output || ''), '长命令被 ^C 中止（killed/已中止）')
+
+  // 安全补丁回归：/api/exec 必须验 token（曾漏检裸奔）
+  const noAuth = await req('POST', '/api/exec', { command: 'echo hi' }, '')
+  ok(noAuth.status === 401, 'exec 无 token 返回 401（安全补丁钉死）')
+  const badAuth = await req('POST', '/api/exec', { command: 'echo hi' }, 'wrong')
+  ok(badAuth.status === 401, 'exec 错误 token 返回 401')
+
   const audit = await req('GET', '/api/audit')
   const auditRecs = JSON.parse(audit.body).records
   ok(auditRecs.some((r) => r.source === 'ai' && r.command === 'df -h'), 'AI 来源审计记录')

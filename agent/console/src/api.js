@@ -50,6 +50,7 @@ export const api = {
   pending: () => req('/api/pending'),
   confirm: (id, approve) => req('/api/confirm', { method: 'POST', body: JSON.stringify({ id, approve }) }),
   exec: (command, confirmed) => req('/api/exec', { method: 'POST', body: JSON.stringify({ command, confirmed }) }),
+  execAbort: () => req('/api/exec/abort', { method: 'POST' }),
   execHistory: () => req('/api/exec/history'),
   audit: () => req('/api/audit'),
   services: () => req('/api/services'),
