@@ -134,15 +134,24 @@ async function testReadRecords() {
   ok(typeof calls[0].cmd === 'string' && calls[0].cmd.startsWith('cat ') && typeof calls[0].timeout === 'number', 'readRemoteText 两参形状正确（命令串, 数字超时）')
   ok(await readRemoteText({ exec: async () => ({ ok: false, error: 'e' }) }, '/x') === null, 'readRemoteText 失败返回 null')
 
-  // readRecords：audit.jsonl 坏行忽略；chat.json 正常解析
+  // readRecords：单通道契约（一次 exec 读两份文件——并发 exec 挤爆 MaxSessions=2 的回归）
+  const recCalls = []
   const fakeSsh = {
     exec: async (connId, cmd) => {
-      if (cmd.includes('audit.jsonl')) return { code: 0, stdout: '{"time":1,"command":"echo hi"}\n坏行\n{"time":2,"command":"df"}' }
-      return { code: 0, stdout: '{"messages":[{"role":"user","content":"你好"}]}' }
+      recCalls.push(cmd)
+      return {
+        code: 0,
+        stdout:
+          '{"time":1,"command":"echo hi"}\n坏行\n{"time":2,"command":"df"}' +
+          '|LS-SEP-9E2|' +
+          '{"messages":[{"role":"user","content":"你好"}]}'
+      }
     }
   }
   const deployerLike = new AgentDeployer(fakeSsh, {})
   const r = await deployerLike.readRecords('c1')
+  ok(recCalls.length === 1, 'readRecords 只发一条 exec（并发通道挤爆 MaxSessions 的回归钉死）')
+  ok(recCalls[0].includes('audit.jsonl') && recCalls[0].includes('chat.json'), '单命令覆盖两份文件')
   ok(r.audit.length === 2 && r.audit[0].command === 'echo hi', 'readRecords：audit 坏行忽略、按序解析')
   ok(r.chat.length === 1 && r.chat[0].content === '你好', 'readRecords：chat.json 解析')
 
@@ -153,9 +162,7 @@ async function testReadRecords() {
 
   // chat.json 坏 JSON → 空聊天不抛错
   const badChat = {
-    exec: async (connId, cmd) => (cmd.includes('chat.json')
-      ? { code: 0, stdout: 'not-json' }
-      : { code: 0, stdout: '' })
+    exec: async () => ({ code: 0, stdout: 'x\n|LS-SEP-9E2|\nnot-json' })
   }
   const r3 = await new AgentDeployer(badChat, {}).readRecords('c1')
   ok(r3.chat.length === 0 && Array.isArray(r3.audit), 'readRecords：坏 chat.json → 空聊天')

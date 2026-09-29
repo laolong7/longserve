@@ -218,8 +218,19 @@ export const useTerminalStore = defineStore('terminals', {
     // AI 向当前终端打字（等同用户手敲，服务器 echo 回显）
     writeActive(data) {
       const tab = this.activeTab
-      if (!tab || !tab.id.startsWith('conn_')) throw new Error('当前没有已连接的终端')
-      window.api.sshWrite(tab.id, data)
+      if (!tab) throw new Error('当前没有已连接的终端')
+      if (tab.id.startsWith('conn_')) {
+        window.api.sshWrite(tab.id, data)
+        return
+      }
+      if (tab.id.startsWith('local_')) {
+        // 本地终端走面板行编辑通路（逐字符本地回显与用户手敲同路）
+        const pane = this.paneRefs.get(tab)
+        if (pane && pane.localInput) pane.localInput(data)
+        else window.api.localWrite(tab.id, data)
+        return
+      }
+      throw new Error('当前没有已连接的终端')
     },
 
     // ---------- 会话录制（asciinema v2） ----------

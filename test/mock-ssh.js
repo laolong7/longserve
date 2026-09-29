@@ -87,11 +87,24 @@ const server = new ssh2.Server(
             done(0)
           } else if (/^cat /.test(cmd)) {
             // cat '<path>' 2>/dev/null —— 部署读远程 config.json
-            const m = cmd.match(/^cat '([^']+)'/)
-            try {
-              ch.write(fs.readFileSync(resolve(m[1]), 'utf8'))
+            // 复合命令（readRecords）：cat audit; echo '|LS-SEP-9E2|'; cat chat → 按分隔符拼两段
+            const SEP = '|LS-SEP-9E2|'
+            if (cmd.includes("echo '" + SEP + "'")) {
+              const segs = cmd.split("; echo '" + SEP + "'; ")
+              const readOne = (seg) => {
+                const mm = seg && seg.match(/cat '([^']+)'/)
+                if (!mm) return ''
+                try { return fs.readFileSync(resolve(mm[1]), 'utf8') } catch { return '' }
+              }
+              ch.write(readOne(segs[0]) + SEP + readOne(segs[1]))
               done(0)
-            } catch { done(1) }
+            } else {
+              const m = cmd.match(/^cat '([^']+)'/)
+              try {
+                ch.write(fs.readFileSync(resolve(m[1]), 'utf8'))
+                done(0)
+              } catch { done(1) }
+            }
           } else if (cmd.includes('base64 -d')) {
             // mkdir -p '<dir>' && echo '<b64>' | base64 -d > '<path>' —— 部署写配置/unit
             const m = cmd.match(/mkdir -p '([^']+)' && echo '([^']*)' \| base64 -d > '([^']+)'/)

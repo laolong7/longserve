@@ -257,6 +257,39 @@ function readScreen() {
   return out
 }
 
+// ---------- 本地终端行编辑（无 pty：cmd 管道不逐字符回显，这里本地回显模拟手敲） ----------
+let localLine = ''  // 当前正在输入的命令行
+let escBuf = ''     // 转义序列缓冲（方向键等不回显）
+function localInput(d) {
+  const id = props.tab.id
+  for (const ch of String(d)) {
+    if (escBuf) {
+      escBuf += ch
+      // CSI/SS3 序列终结符即吞掉（方向键/功能键不产生可见字符）
+      if (escBuf.length > 1 && ch >= '@' && ch <= '~') escBuf = ''
+      continue
+    }
+    if (ch === '\x1b') { escBuf = '\x1b'; continue }
+    if (ch === '\r' || ch === '\n') {
+      term.write('\r\n')
+      window.api.localWrite(id, localLine + '\n')
+      localLine = ''
+    } else if (ch === '\x7f' || ch === '\b') {
+      if (localLine.length) { localLine = localLine.slice(0, -1); term.write('\b \b') }
+    } else if (ch === '\x03') {
+      // Ctrl+C：打断当前输入行（管道里的 cmd 不认 ^C，本地清行即可）
+      term.write('^C\r\n')
+      localLine = ''
+    } else if (ch === '\x15') {
+      // Ctrl+U：清空整行
+      while (localLine.length) { localLine = localLine.slice(0, -1); term.write('\b \b') }
+    } else if (ch >= ' ') {
+      localLine += ch
+      term.write(ch)
+    }
+  }
+}
+
 function fit() {
   if (!term || !hostEl.value) return
   try {
@@ -416,7 +449,7 @@ onMounted(() => {
   // 键盘输入 -> 服务器（与手敲完全一致）
   term.onData((d) => {
     if (props.tab.id.startsWith('conn_')) window.api.sshWrite(props.tab.id, d)
-    else if (props.tab.id.startsWith('local_')) window.api.localWrite(props.tab.id, d)
+    else if (props.tab.id.startsWith('local_')) localInput(d)
   })
   // 尺寸变化 -> 同步远端 pty
   term.onResize(({ rows, cols }) => {
@@ -429,7 +462,8 @@ onMounted(() => {
   // 注册给 store（AI 读写当前终端用；key 用 tab 对象引用，重连换 id 不失效）
   store.registerPane(props.tab, {
     get term() { return term },
-    readScreen
+    readScreen,
+    localInput
   })
 
   bindConn(props.tab.id)

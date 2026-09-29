@@ -23,9 +23,10 @@ class LocalShellManager {
     return new Promise((resolve, reject) => {
       const shellId = `local_${Date.now()}_${++this.seq}`
       const isWin = process.platform === 'win32'
-      // Windows：经典命令提示符（/d 跳过 AutoRun）；其他平台用登录 shell
+      // Windows：经典命令提示符。/d 跳过 AutoRun；/q 启动即关命令回显
+      // （交互中 @echo off 关不掉管道回显、/q 才有效——实测钉死；回显由渲染层行编辑接管）
       const proc = isWin
-        ? spawn('cmd.exe', ['/d'], { cwd: os.homedir(), windowsHide: true, env: process.env })
+        ? spawn('cmd.exe', ['/d', '/q'], { cwd: os.homedir(), windowsHide: true, env: process.env })
         : spawn(process.env.SHELL || '/bin/bash', ['-i'], { cwd: os.homedir(), env: process.env })
 
       const meta = { proc, pending: [], pendingBytes: 0, attached: false, closed: false }
@@ -63,10 +64,10 @@ class LocalShellManager {
         this.send(`local:close:${shellId}`, { code })
       })
 
-      // Windows 切 UTF-8 代码页，中文输出不乱码
+      // Windows 启动序列：UTF-8 代码页（防中文乱码）+ 清屏去 banner
       if (isWin) {
         setTimeout(() => {
-          try { proc.stdin.write('chcp 65001\r\n') } catch { /* 已退出 */ }
+          try { proc.stdin.write('chcp 65001\r\ncls\r\n') } catch { /* 已退出 */ }
         }, 150)
       }
       // 给启动一点时间，失败会在 error/close 暴露

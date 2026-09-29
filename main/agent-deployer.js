@@ -118,8 +118,18 @@ class AgentDeployer {
 
     // 1. 端口预检（ss 不存在则跳过，失败靠启动阶段暴露）
     report('check', 6, '检测端口占用…')
-    const portBusy = await this.checkPort(ssh, port)
-    if (portBusy) throw new Error(`端口 ${port} 已被占用，请换一个端口再部署`)
+    let portBusy = await this.checkPort(ssh, port)
+    if (portBusy) {
+      // 更新场景：端口多半是旧版 Agent 自己占着——识别出来就先停服务释放，
+      // 后面的启动步骤会带新二进制把它拉起来；是别的程序占的才报错换端口
+      const svc = await ssh.exec(`systemctl is-active ${SERVICE} 2>/dev/null`, 8000)
+      const ours = svc.ok && svc.stdout.trim() === 'active'
+      if (!ours) throw new Error(`端口 ${port} 已被其他程序占用，请换一个端口再部署`)
+      report('check', 7, '端口由旧版 Agent 占用，正在停止旧服务…')
+      await ssh.exec(`systemctl stop ${SERVICE}`, 15000)
+      portBusy = await this.checkPort(ssh, port)
+      if (portBusy) throw new Error(`停止旧版 Agent 后端口 ${port} 仍被占用，请手动检查后重试`)
+    }
 
     // 2. 生成 token 与配置（纯 exec 小命令，连接最健康时先做完；
     //    此阶段刻意不开 sftp 通道——sshd MaxSessions 紧的服务器上
@@ -247,12 +257,19 @@ class AgentDeployer {
 
   // 手机端记录（磁盘直读）：指令记录 audit.jsonl + 聊天记录 chat.json
   // 桌面端「手机控制」面板展示网页/手机端的操作历史用
+  // 注意：必须单条命令一次 exec 读完——MaxSessions=2 的服务器（shell 已占 1）
+  // 并发 exec 会把通道挤爆，表现为假超时/连接劣化（v1.14.1 踩坑）
   async readRecords(connId) {
     const ssh = { exec: makeExec(this.ssh, connId) }
-    const [auditRaw, chatRaw] = await Promise.all([
-      readRemoteText(ssh, REMOTE_DIR + '/data/audit.jsonl'),
-      readRemoteText(ssh, REMOTE_DIR + '/data/chat.json')
-    ])
+    const SEP = '|LS-SEP-9E2|'
+    const r = await ssh.exec(
+      `cat ${shQuote(REMOTE_DIR + '/data/audit.jsonl')} 2>/dev/null; echo '${SEP}'; cat ${shQuote(REMOTE_DIR + '/data/chat.json')} 2>/dev/null`,
+      20000
+    )
+    const out = (r.ok && r.stdout) || ''
+    const cut = out.indexOf(SEP)
+    const auditRaw = cut >= 0 ? out.slice(0, cut) : out
+    const chatRaw = cut >= 0 ? out.slice(cut + SEP.length) : ''
     const audit = String(auditRaw || '')
       .split('\n')
       .filter(Boolean)
