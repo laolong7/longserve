@@ -14,6 +14,7 @@ const store = require('./store')
 const ai = require('./ai')
 const status = require('./status')
 const execMod = require('./exec')
+const services = require('./services')
 
 const PORT_DEFAULT = 37777
 
@@ -193,7 +194,53 @@ async function handleApi(req, res, pathname, query) {
     return sendJson(res, 200, { ok: true, records: store.readAudit(200) })
   }
 
+  // ---- 指令历史（磁盘重建的终端转写，重开页面不丢） ----
+  if (pathname === '/api/exec/history' && req.method === 'GET') {
+    return sendJson(res, 200, { ok: true, records: execTranscript(200) })
+  }
+
+  // ---- 服务控制（全部 systemd 服务） ----
+  if (pathname === '/api/services' && req.method === 'GET') {
+    try {
+      return sendJson(res, 200, { ok: true, services: await services.list() })
+    } catch (err) {
+      return sendJson(res, 500, { error: err.message })
+    }
+  }
+  if (pathname === '/api/services/action' && req.method === 'POST') {
+    const body = await readBody(req)
+    const name = String(body.name || '')
+    const action = String(body.action || '')
+    const ACTION_TEXT = services.ACTION_TEXT
+    // 状态变更类操作一律两段式：先回 needConfirm，控制台确认后带 confirmed=true 重发
+    if (!body.confirmed && ['stop', 'restart', 'disable'].includes(action)) {
+      return sendJson(res, 200, {
+        ok: true,
+        needConfirm: true,
+        reasons: [`将执行 systemctl ${action} ${name}`, '服务会中断，确定继续？']
+      })
+    }
+    try {
+      const r = await services.act(name, action)
+      store.appendAudit({ time: Date.now(), source: 'manual', command: `systemctl ${action} ${name}`, danger: false, code: 0, output: r.output, note: ACTION_TEXT[action] || action })
+      return sendJson(res, 200, { ok: true, output: r.output })
+    } catch (err) {
+      return sendJson(res, 500, { error: err.message })
+    }
+  }
+
   return sendJson(res, 404, { error: '接口不存在' })
+}
+
+// 从 audit.jsonl 重建指令终端转写：
+//   完成记录（带 output）一命令一条；拒绝记录（approved===false）也保留；
+//   跳过「等待确认」挂起记录与纯批准记录（结果都在完成记录里，避免重复）
+function execTranscript(limit = 200) {
+  return store
+    .readAudit(1000)
+    .filter((r) => r && (r.output || r.approved === false))
+    .slice(0, limit)
+    .reverse() // readAudit 新的在前 → 转写要旧的在前
 }
 
 // 手动指令（不经 AI 直接执行）：两段式危险确认 ——

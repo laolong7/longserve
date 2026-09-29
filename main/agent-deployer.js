@@ -64,6 +64,13 @@ async function readRemoteFile(ssh, remotePath) {
   try { return JSON.parse(r.stdout) } catch { return null }
 }
 
+// 远程读文本文件原文（JSONL 等非单 JSON 的文件用）
+async function readRemoteText(ssh, remotePath) {
+  const r = await ssh.exec(`cat ${shQuote(remotePath)} 2>/dev/null`, 15000)
+  if (!r.ok || r.code !== 0) return null
+  return String(r.stdout || '')
+}
+
 // 解析 `ldd --version` 首行，判断目标机 libc：
 //   glibc：'ldd (Ubuntu GLIBC 2.31-0ubuntu9.16) 2.31' / 'ldd (GNU libc) 2.17' → { musl:false, version:'2.31', minor:31 }
 //   musl：'musl libc (x86_64)' → { musl:true }（glibc 构建的二进制在 musl 上跑不了）
@@ -234,6 +241,29 @@ class AgentDeployer {
     return { active, healthy }
   }
 
+  // 手机端记录（磁盘直读）：指令记录 audit.jsonl + 聊天记录 chat.json
+  // 桌面端「手机控制」面板展示网页/手机端的操作历史用
+  async readRecords(connId) {
+    const ssh = { exec: makeExec(this.ssh, connId) }
+    const [auditRaw, chatRaw] = await Promise.all([
+      readRemoteText(ssh, REMOTE_DIR + '/data/audit.jsonl'),
+      readRemoteText(ssh, REMOTE_DIR + '/data/chat.json')
+    ])
+    const audit = String(auditRaw || '')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => {
+        try { return JSON.parse(l) } catch { return null }
+      })
+      .filter(Boolean)
+    let chat = []
+    try {
+      const j = JSON.parse(chatRaw || '')
+      chat = Array.isArray(j.messages) ? j.messages : []
+    } catch { /* 文件不存在/损坏 → 空记录 */ }
+    return { audit, chat }
+  }
+
   // ---------- 内部 ----------
   // glibc 预检：失败/识别不出返回 null，不阻塞部署
   async checkGlibc(ssh) {
@@ -284,5 +314,5 @@ class AgentDeployer {
   }
 }
 
-// makeExec / writeRemoteFile / readRemoteFile / parseGlibcVersion 导出供契约测试使用
-module.exports = { AgentDeployer, agentBinaryPath, REMOTE_DIR, SERVICE, PORT_DEFAULT, makeExec, writeRemoteFile, readRemoteFile, parseGlibcVersion }
+// makeExec / writeRemoteFile / readRemoteFile / readRemoteText / parseGlibcVersion 导出供契约测试使用
+module.exports = { AgentDeployer, agentBinaryPath, REMOTE_DIR, SERVICE, PORT_DEFAULT, makeExec, writeRemoteFile, readRemoteFile, readRemoteText, parseGlibcVersion }

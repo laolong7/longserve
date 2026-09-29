@@ -329,6 +329,11 @@ function registerIpc() {
     try { return { ok: true, ...(await agentDeployer.status(connId, port)) } }
     catch (err) { return { ok: false, error: err.message } }
   })
+  // 手机端记录（磁盘直读）：指令记录 audit.jsonl + 聊天记录 chat.json
+  ipcMain.handle('agent:records', async (_e, connId) => {
+    try { return { ok: true, ...(await agentDeployer.readRecords(connId)) } }
+    catch (err) { return { ok: false, error: err.message } }
+  })
   // 部署失败 AI 诊断：把错误（含 journalctl 日志）交给所选 AI 分析根因与修法
   ipcMain.handle('agent:diagnose', async (_e, provider, errorText) => {
     try { return { ok: true, diag: await diagnoseDeploy(provider, errorText) } }

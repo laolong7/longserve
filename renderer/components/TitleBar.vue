@@ -5,6 +5,7 @@
       <span class="tb-title">Longserve</span>
     </div>
     <div class="tb-actions">
+      <button class="tb-btn tb-about" title="手机控制" @click="openAgent()">📱</button>
       <button class="tb-btn tb-about" title="使用指南" @click="openGuide()">📖</button>
       <button class="tb-btn tb-about" title="关于系统" @click="openAbout()">ⓘ</button>
       <button class="tb-btn" title="最小化" @click="api.winMinimize()">─</button>
@@ -22,6 +23,7 @@ import { ref, inject, onMounted, onBeforeUnmount } from 'vue'
 const api = window.api
 const openAbout = inject('openAbout', () => {})
 const openGuide = inject('openGuide', () => {})
+const openAgent = inject('openAgent', () => {})
 const maximized = ref(false)
 let unsub = null
 

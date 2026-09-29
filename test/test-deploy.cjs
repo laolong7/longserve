@@ -12,7 +12,7 @@
 const path = require('path')
 const fs = require('fs')
 const { spawn } = require('child_process')
-const { makeExec, writeRemoteFile, readRemoteFile, parseGlibcVersion, AgentDeployer, agentBinaryPath } = require('../main/agent-deployer')
+const { makeExec, writeRemoteFile, readRemoteFile, readRemoteText, parseGlibcVersion, AgentDeployer, agentBinaryPath } = require('../main/agent-deployer')
 
 let passed = 0
 let failed = 0
@@ -118,6 +118,49 @@ function testParseGlibc() {
   ok(parseGlibcVersion('') === null, '空输出返回 null')
 }
 
+// ---------- 单元：手机端记录磁盘直读（readRemoteText / readRecords） ----------
+console.log('手机端记录磁盘直读（readRemoteText / readRecords）')
+async function testReadRecords() {
+  // readRemoteText 两参契约 + 原文返回（不解析 JSON）
+  const calls = []
+  const rec = {
+    exec: async (cmd, timeout) => {
+      calls.push({ cmd, timeout })
+      return { ok: true, code: 0, stdout: '{"a":1}\nnot-json\n' }
+    }
+  }
+  const raw = await readRemoteText(rec, '/opt/longserve-agent/data/audit.jsonl')
+  ok(raw === '{"a":1}\nnot-json\n', 'readRemoteText 返回原文不解析')
+  ok(typeof calls[0].cmd === 'string' && calls[0].cmd.startsWith('cat ') && typeof calls[0].timeout === 'number', 'readRemoteText 两参形状正确（命令串, 数字超时）')
+  ok(await readRemoteText({ exec: async () => ({ ok: false, error: 'e' }) }, '/x') === null, 'readRemoteText 失败返回 null')
+
+  // readRecords：audit.jsonl 坏行忽略；chat.json 正常解析
+  const fakeSsh = {
+    exec: async (connId, cmd) => {
+      if (cmd.includes('audit.jsonl')) return { code: 0, stdout: '{"time":1,"command":"echo hi"}\n坏行\n{"time":2,"command":"df"}' }
+      return { code: 0, stdout: '{"messages":[{"role":"user","content":"你好"}]}' }
+    }
+  }
+  const deployerLike = new AgentDeployer(fakeSsh, {})
+  const r = await deployerLike.readRecords('c1')
+  ok(r.audit.length === 2 && r.audit[0].command === 'echo hi', 'readRecords：audit 坏行忽略、按序解析')
+  ok(r.chat.length === 1 && r.chat[0].content === '你好', 'readRecords：chat.json 解析')
+
+  // 文件缺失（cat 退出码非 0）→ 空记录不抛错
+  const emptySsh = { exec: async () => ({ code: 1, stdout: '' }) }
+  const r2 = await new AgentDeployer(emptySsh, {}).readRecords('c1')
+  ok(r2.audit.length === 0 && r2.chat.length === 0, 'readRecords：文件缺失 → 空记录')
+
+  // chat.json 坏 JSON → 空聊天不抛错
+  const badChat = {
+    exec: async (connId, cmd) => (cmd.includes('chat.json')
+      ? { code: 0, stdout: 'not-json' }
+      : { code: 0, stdout: '' })
+  }
+  const r3 = await new AgentDeployer(badChat, {}).readRecords('c1')
+  ok(r3.chat.length === 0 && Array.isArray(r3.audit), 'readRecords：坏 chat.json → 空聊天')
+}
+
 // ---------- 集成：mock-ssh 全链路部署 ----------
 console.log('mock-ssh 全链路（部署→状态→换钥→卸载）')
 async function testFullDeploy() {
@@ -175,6 +218,16 @@ async function testFullDeploy() {
     const r2 = await deployer.regenerateToken(connId, 37777)
     ok(!!r2.token && r2.token !== r.token, '换发 token 成功且已更新')
 
+    // 5.5 手机端记录磁盘直读（写入 audit.jsonl / chat.json 后 readRecords）
+    const sshExec = { exec: makeExec(sshManager, connId) }
+    await writeRemoteFile(sshExec, '/opt/longserve-agent/data/audit.jsonl',
+      '{"time":1,"source":"manual","command":"echo hi","danger":false,"output":"hi"}\n坏行\n{"time":2,"source":"ai","command":"df -h","danger":false,"output":"disk"}\n')
+    await writeRemoteFile(sshExec, '/opt/longserve-agent/data/chat.json',
+      '{"savedAt":1,"messages":[{"role":"user","content":"你好"},{"role":"assistant","content":"好"}]}')
+    const recs = await deployer.readRecords(connId)
+    ok(recs.audit.length === 2 && recs.audit[0].command === 'echo hi' && recs.audit[1].source === 'ai', 'readRecords 全链路：audit.jsonl 解析（坏行忽略）')
+    ok(recs.chat.length === 2 && recs.chat[1].content === '好', 'readRecords 全链路：chat.json 解析')
+
     // 6. 卸载（回归：旧版必抛"卸载失败：undefined"）
     const r3 = await deployer.undeploy(connId)
     ok(r3.ok === true, '卸载成功')
@@ -188,6 +241,7 @@ async function testFullDeploy() {
 ;(async () => {
   await testMakeExec()
   await testRemoteFile()
+  await testReadRecords()
   testParseGlibc()
   await testFullDeploy()
   console.log(`\n结果：${passed} 通过，${failed} 失败`)

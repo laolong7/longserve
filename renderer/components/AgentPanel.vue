@@ -109,49 +109,115 @@
 
       <!-- ===== 已部署详情 ===== -->
       <template v-else-if="current">
-        <div class="qr-wrap">
-          <img v-if="qrDataUrl" :src="qrDataUrl" class="qr" alt="扫码绑定" />
-          <div class="qr-hint">手机浏览器扫码 → 自动绑定</div>
+        <!-- 详情子页签：连接 / 指令记录 / 聊天记录 -->
+        <div class="sub-tabs">
+          <div class="sub-tab" :class="{ on: detailTab === 'link' }" @click="detailTab = 'link'">连接</div>
+          <div class="sub-tab" :class="{ on: detailTab === 'exec' }" @click="switchDetail('exec')">指令记录</div>
+          <div class="sub-tab" :class="{ on: detailTab === 'chat' }" @click="switchDetail('chat')">聊天记录</div>
+          <div class="grow"></div>
+          <template v-if="detailTab !== 'link'">
+            <span class="faint" style="font-size:10.5px">{{ recordsTimeText }}</span>
+            <button class="ghost" style="margin-left:8px; font-size:11px; padding:3px 10px" :disabled="recordsLoading" @click="loadRecords">
+              {{ recordsLoading ? '读取中…' : '↻ 刷新' }}
+            </button>
+          </template>
         </div>
-        <div class="form-row">
-          <label>连接地址（含绑定密钥，请勿泄露）</label>
-          <div class="link-row">
-            <span class="mono link-text ellipsis">{{ link }}</span>
-            <button @click="copyLink">复制</button>
-          </div>
-        </div>
-        <div class="form-2col">
-          <div class="form-row">
-            <label>服务器</label>
-            <div>{{ current.instanceName }}（<span class="mono">{{ current.host }}</span>）</div>
+
+        <!-- ---- 连接 ---- -->
+        <template v-if="detailTab === 'link'">
+          <div class="qr-wrap">
+            <img v-if="qrDataUrl" :src="qrDataUrl" class="qr" alt="扫码绑定" />
+            <div class="qr-hint">手机浏览器扫码 → 自动绑定</div>
           </div>
           <div class="form-row">
-            <label>端口</label>
-            <div class="mono">{{ current.port }}</div>
-          </div>
-        </div>
-        <div class="form-2col">
-          <div class="form-row">
-            <label>Agent 状态（需连接该服务器后查看）</label>
-            <div>
-              <span v-if="statusText" class="mono">{{ statusText }}</span>
-              <button class="ghost" style="margin-left:8px" @click="refreshStatus" :disabled="checking">{{ checking ? '检测中…' : '刷新' }}</button>
+            <label>连接地址（含绑定密钥，请勿泄露）</label>
+            <div class="link-row">
+              <span class="mono link-text ellipsis selectable" :title="link">{{ link }}</span>
+              <button class="link-copy" @click="copyLink">复制</button>
             </div>
           </div>
-          <div class="form-row">
-            <label>部署时间</label>
-            <div>{{ new Date(current.deployedAt).toLocaleString('zh-CN') }}</div>
+          <div class="form-2col">
+            <div class="form-row">
+              <label>服务器</label>
+              <div class="ellipsis">{{ current.instanceName }}（<span class="mono">{{ current.host }}</span>）</div>
+            </div>
+            <div class="form-row">
+              <label>端口</label>
+              <div class="mono">{{ current.port }}</div>
+            </div>
           </div>
-        </div>
-        <div class="faint" style="margin-bottom:14px; font-size:11.5px; line-height:1.7">
-          换绑/解绑手机：点「重新生成密钥」，旧二维码立即作废。<br>
-          卸载会停止并删除服务器上的 Agent 与其数据（不影响其他服务）。
-        </div>
-        <div class="form-actions">
-          <button class="danger" @click="undeploy">卸载</button>
-          <div class="grow"></div>
-          <button @click="regenToken" :disabled="regening">{{ regening ? '生成中…' : '重新生成密钥（解绑全部手机）' }}</button>
-        </div>
+          <div class="form-2col">
+            <div class="form-row">
+              <label>Agent 状态（需连接该服务器后查看）</label>
+              <div>
+                <span v-if="statusText" class="mono">{{ statusText }}</span>
+                <button class="ghost" style="margin-left:8px" @click="refreshStatus" :disabled="checking">{{ checking ? '检测中…' : '刷新' }}</button>
+              </div>
+            </div>
+            <div class="form-row">
+              <label>部署时间</label>
+              <div>{{ new Date(current.deployedAt).toLocaleString('zh-CN') }}</div>
+            </div>
+          </div>
+          <div class="faint" style="margin-bottom:14px; font-size:11.5px; line-height:1.7">
+            换绑/解绑手机：点「重新生成密钥」，旧二维码立即作废，全部手机解绑。<br>
+            卸载会停止并删除服务器上的 Agent 与其数据（不影响其他服务）。
+          </div>
+          <div class="form-actions">
+            <button class="danger" @click="undeploy">卸载</button>
+            <div class="grow"></div>
+            <button class="regen-btn" @click="regenToken" :disabled="regening">{{ regening ? '生成中…' : '重新生成密钥' }}</button>
+          </div>
+        </template>
+
+        <!-- ---- 指令记录（手机端磁盘存储 audit.jsonl） ---- -->
+        <template v-else-if="detailTab === 'exec'">
+          <div v-if="recordsError" class="key-warn">{{ recordsError }}</div>
+          <div v-else-if="recordsLoading" class="empty-hint rec-empty"><div>正在读取服务器磁盘记录…</div></div>
+          <div v-else-if="!execRecords.length" class="empty-hint rec-empty">
+            <div class="big">❯</div>
+            <div>暂无指令记录</div>
+            <div class="faint">手机端执行过的指令都会记录在服务器磁盘上</div>
+          </div>
+          <div v-else class="rec-list">
+            <div v-for="(r, i) in execRecords" :key="i" class="rec" :class="{ danger: r.danger, denied: r.approved === false }">
+              <div class="rec-top">
+                <span class="src" :class="r.source === 'ai' ? 'ai' : 'manual'">{{ r.source === 'ai' ? '✦ AI' : '❯ 手动' }}</span>
+                <span v-if="r.danger" class="flag">{{ r.approved === false ? '已拒绝' : r.approved === true ? '已批准·危险' : r.note === '等待确认' ? '待确认' : '危险' }}</span>
+                <span class="time mono">{{ recTime(r.time) }}</span>
+              </div>
+              <div class="rec-cmd mono">$ {{ r.command }}</div>
+              <div v-if="r.note && r.note !== '等待确认'" class="rec-note">{{ r.note }}</div>
+              <div v-if="r.output" class="rec-out mono">{{ r.output }}</div>
+            </div>
+          </div>
+        </template>
+
+        <!-- ---- 聊天记录（手机端磁盘存储 chat.json） ---- -->
+        <template v-else>
+          <div v-if="recordsError" class="key-warn">{{ recordsError }}</div>
+          <div v-else-if="recordsLoading" class="empty-hint rec-empty"><div>正在读取服务器磁盘记录…</div></div>
+          <div v-else-if="!chatRecords.length" class="empty-hint rec-empty">
+            <div class="big">✦</div>
+            <div>暂无聊天记录</div>
+            <div class="faint">手机端与 AI 的对话都会保存在服务器磁盘上</div>
+          </div>
+          <div v-else class="rec-list">
+            <template v-for="(m, i) in chatRecords" :key="i">
+              <div v-if="m.role === 'user'" class="chat-row user">
+                <div class="chat-role">牢笼</div>
+                <div class="chat-bubble user-bubble">{{ m.content }}</div>
+              </div>
+              <div v-else-if="m.role === 'assistant' && (m.content || (m.tool_calls && m.tool_calls.length))" class="chat-row ai">
+                <div class="chat-role">✦ AI</div>
+                <div v-if="m.content" class="chat-bubble ai-bubble">{{ m.content }}</div>
+                <div v-for="tc in (m.tool_calls || [])" :key="tc.id" class="chat-tool mono">
+                  ▸ {{ (tc.function && tc.function.name) || 'tool' }} {{ toolBrief(tc) }}
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
       </template>
 
       <div v-else class="empty-hint">
@@ -188,6 +254,63 @@ const checking = ref(false)
 const statusText = ref('')
 const regening = ref(false)
 let stepUnsub = null
+
+// 详情子页签 + 磁盘记录（手机端指令/聊天记录，SSH 直读服务器磁盘）
+const detailTab = ref('link') // 'link' | 'exec' | 'chat'
+const records = ref({ audit: [], chat: [] })
+const recordsLoading = ref(false)
+const recordsError = ref('')
+const recordsLoadedAt = ref(0)
+const execRecords = computed(() => records.value.audit.slice().reverse()) // 新的在前
+const chatRecords = computed(() => (records.value.chat || []).filter((m) => m.role === 'user' || m.role === 'assistant'))
+const recordsTimeText = computed(() =>
+  recordsLoadedAt.value ? '磁盘记录 · ' + new Date(recordsLoadedAt.value).toLocaleTimeString('zh-CN') : '磁盘记录'
+)
+
+function recTime(t) {
+  if (!t) return ''
+  return new Date(t).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+// AI 工具调用简报（聊天记录里只留一行摘要）
+function toolBrief(tc) {
+  try {
+    const args = JSON.parse((tc.function && tc.function.arguments) || '{}')
+    const s = args.command || args.path || args.name || ''
+    return s ? String(s).slice(0, 60) : ''
+  } catch {
+    return ''
+  }
+}
+
+function switchDetail(tabName) {
+  detailTab.value = tabName
+  if (!recordsLoadedAt.value && !recordsLoading.value) loadRecords()
+}
+
+// 手机端记录：走 SSH 读 /opt/longserve-agent/data/ 下的 audit.jsonl / chat.json
+async function loadRecords() {
+  const conn = connOf(current.value.instanceId)
+  if (!conn) {
+    recordsError.value = '请先在主界面连接该服务器，再查看磁盘记录'
+    return
+  }
+  recordsLoading.value = true
+  recordsError.value = ''
+  try {
+    const r = await window.api.agentRecords(conn.id)
+    if (r.ok) {
+      records.value = { audit: r.audit || [], chat: r.chat || [] }
+      recordsLoadedAt.value = Date.now()
+    } else {
+      recordsError.value = '读取失败：' + (r.error || '未知错误')
+    }
+  } catch (e) {
+    recordsError.value = '读取失败：' + (e.message || String(e))
+  } finally {
+    recordsLoading.value = false
+  }
+}
 
 // 部署阶段里程碑（与主进程 agent-deployer 的 percent 对齐）
 const PHASES = [
@@ -252,6 +375,10 @@ async function runDiagnose(provider, errorText) {
 async function select(d) {
   mode.value = 'detail'
   currentId.value = d.id
+  detailTab.value = 'link'
+  records.value = { audit: [], chat: [] }
+  recordsError.value = ''
+  recordsLoadedAt.value = 0
   qrDataUrl.value = await QRCode.toDataURL(link.value, { width: 220, margin: 1, color: { dark: '#0e1116', light: '#e8f6fa' } })
   statusText.value = ''
 }
@@ -392,9 +519,11 @@ onUnmounted(() => {
 }
 .side-item:hover { background: var(--bg3); }
 .side-item.on { background: var(--bg3); border-color: var(--border-strong); }
-.form-panel { flex: 1; padding: 18px 20px; overflow-y: auto; }
+.form-panel { flex: 1; min-width: 0; padding: 18px 20px; overflow-y: auto; }
+/* 关键：grid/flex 子项默认 min-width:auto，长内容（URL/长按钮）会把布局撑破——统一压到 0 */
 .form-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.form-actions { display: flex; gap: 8px; margin-top: 6px; }
+.form-2col > * { min-width: 0; }
+.form-actions { display: flex; flex-wrap: wrap; gap: 8px; row-gap: 8px; margin-top: 6px; }
 .key-warn {
   color: var(--amber);
   font-size: 12px;
@@ -498,16 +627,105 @@ onUnmounted(() => {
   padding: 6px;
 }
 .qr-hint { font-size: 11px; color: var(--text-faint); margin-top: 6px; }
-.link-row { display: flex; gap: 8px; align-items: center; }
+.link-row { display: flex; gap: 8px; align-items: center; min-width: 0; }
 .link-text {
   flex: 1;
+  min-width: 0; /* 没有它 ellipsis 失效，长 URL 直接撑破子页面 */
   background: var(--bg2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 6px 10px;
   font-size: 11.5px;
 }
+.link-copy { flex-shrink: 0; }
+.regen-btn { max-width: 100%; white-space: nowrap; }
+
+/* ---------- 详情子页签 ---------- */
+.sub-tabs {
+  display: flex; align-items: center; gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin: -6px 0 14px;
+  padding-bottom: 0;
+}
+.sub-tab {
+  padding: 7px 12px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.sub-tab:hover { color: var(--text); }
+.sub-tab.on { color: var(--cyan); border-bottom-color: var(--cyan); }
+
+/* ---------- 记录列表（指令/聊天共用骨架） ---------- */
+.rec-list { display: flex; flex-direction: column; gap: 8px; padding-bottom: 12px; }
+.rec {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+.rec.danger { border-color: rgba(242, 177, 85, 0.35); }
+.rec.denied { opacity: 0.65; }
+.rec-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.src { font-size: 10.5px; padding: 1px 8px; border-radius: 8px; }
+.src.ai { color: var(--violet, #a78bfa); background: rgba(167, 139, 250, 0.12); }
+.src.manual { color: var(--cyan, #5ccfe6); background: var(--cyan-dim, rgba(92, 207, 230, 0.14)); }
+.flag { font-size: 10px; color: var(--amber); background: var(--amber-dim); padding: 1px 8px; border-radius: 8px; }
+.rec.denied .flag { color: var(--red); background: var(--red-dim); }
+.time { margin-left: auto; font-size: 10.5px; color: var(--text-faint); }
+.rec-cmd { font-size: 12px; color: var(--text); word-break: break-all; }
+.rec-note { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+.rec-out {
+  margin-top: 6px; padding-top: 6px;
+  border-top: 1px dashed var(--border);
+  font-size: 10.5px; color: var(--text-faint);
+  white-space: pre-wrap; word-break: break-all;
+  max-height: 120px; overflow: hidden;
+}
+
+/* ---------- 聊天气泡 ---------- */
+.chat-row { display: flex; flex-direction: column; gap: 4px; }
+.chat-role { font-size: 10.5px; color: var(--text-faint); }
+.chat-row.user .chat-role { text-align: right; }
+.chat-bubble {
+  max-width: 92%;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+.user-bubble {
+  align-self: flex-end;
+  background: var(--cyan-dim, rgba(92, 207, 230, 0.14));
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+}
+.ai-bubble {
+  align-self: flex-start;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.chat-tool {
+  align-self: flex-start;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  background: var(--bg0);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .empty-hint { text-align: center; padding-top: 90px; }
+.empty-hint.rec-empty { padding-top: 46px; }
 .empty-hint .big { font-size: 40px; margin-bottom: 10px; }
 .empty-hint .faint { margin-top: 6px; font-size: 11.5px; }
 .faint { color: var(--text-faint); }

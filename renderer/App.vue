@@ -88,12 +88,14 @@ const openFiles = () => filesRef.value?.open()
 const openHistory = () => historyRef.value?.open()
 const openAbout = () => aboutRef.value?.open('about')
 const openGuide = () => aboutRef.value?.open('guide')
+const openAgent = () => openSettings('agent') // 标题栏 📱 手机控制入口
 const openTunnels = () => tunnelsRef.value?.open(store.activeTab)
 const openLogs = () => logsRef.value?.open()
 const openCast = () => castRef.value?.open()
 provide('openSettings', openSettings)
 provide('openAbout', openAbout)
 provide('openGuide', openGuide)
+provide('openAgent', openAgent)
 provide('openCast', openCast)
 
 onMounted(async () => {

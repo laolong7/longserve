@@ -30,14 +30,23 @@
       </div>
 
       <main class="content">
-        <StatusView v-show="tab === 'status'" :online="online" @confirm-show="refreshPending" />
+        <StatusView v-show="tab === 'status'" />
         <ChatView v-show="tab === 'chat'" ref="chatRef" @pending="refreshPending" />
-        <ExecView v-show="tab === 'exec'" />
-        <AuditView v-show="tab === 'audit'" />
+        <ExecView v-show="tab === 'exec'" :hostname="serverName" />
       </main>
 
       <nav class="tabbar">
-        <div v-for="t in TABS" :key="t.id" class="tab" :class="{ on: tab === t.id }" @click="switchTab(t.id)">
+        <div
+          v-for="t in TABS"
+          :key="t.id"
+          class="tab"
+          :class="{ on: tab === t.id }"
+          role="button"
+          :aria-label="t.label"
+          tabindex="0"
+          @click="switchTab(t.id)"
+          @keydown.enter="switchTab(t.id)"
+        >
           <span class="tab-ico">{{ t.ico }}</span>
           <span class="tab-label">{{ t.label }}</span>
         </div>
@@ -52,13 +61,11 @@ import { api, setToken, hasToken, forgetToken } from './api'
 import StatusView from './views/StatusView.vue'
 import ChatView from './views/ChatView.vue'
 import ExecView from './views/ExecView.vue'
-import AuditView from './views/AuditView.vue'
 
 const TABS = [
   { id: 'status', ico: '◈', label: '概览' },
   { id: 'chat', ico: '✦', label: 'AI' },
-  { id: 'exec', ico: '❯', label: '指令' },
-  { id: 'audit', ico: '≡', label: '审计' }
+  { id: 'exec', ico: '❯', label: '指令' }
 ]
 
 const bound = ref(false)
@@ -189,6 +196,20 @@ onUnmounted(() => clearInterval(pollTimer))
   background: rgba(14, 17, 22, 0.82);
   backdrop-filter: blur(8px);
   flex-shrink: 0;
+  position: relative;
+}
+/* 顶栏底部游走的扫描光（科幻仪表感，细而克制） */
+.topbar::after {
+  content: '';
+  position: absolute; left: 0; right: 0; bottom: -1px; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(92, 207, 230, 0.5), transparent);
+  background-size: 120px 100%;
+  background-repeat: no-repeat;
+  animation: topScan 5s linear infinite;
+}
+@keyframes topScan {
+  0% { background-position: -140px 0; }
+  100% { background-position: calc(100% + 140px) 0; }
 }
 .srv { display: flex; align-items: center; gap: 8px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); animation: breathe 2.4s ease-in-out infinite; }
@@ -223,8 +244,18 @@ onUnmounted(() => clearInterval(pollTimer))
   padding: 8px 0 7px;
   color: var(--text-faint);
   cursor: pointer;
+  position: relative;
 }
+/* 选中页签：顶部亮线 + 图标发光 */
 .tab.on { color: var(--cyan); }
+.tab.on::before {
+  content: '';
+  position: absolute; top: -1px; left: 22%; right: 22%; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  border-radius: 1px;
+}
+.tab.on .tab-ico { filter: drop-shadow(0 0 6px rgba(92, 207, 230, 0.7)); }
 .tab-ico { font-size: 17px; line-height: 1; }
 .tab-label { font-size: 10.5px; }
+.tab:focus-visible { outline: 1px solid var(--border-strong); outline-offset: -2px; }
 </style>

@@ -31,6 +31,27 @@ console.log('危险命令规则')
   ok(checkDanger('echo hello && rm -rf /tmp/x').danger === true, '链式命令里的 rm 拦截')
 }
 
+// ---------- 单元：服务列表解析（systemctl 输出契约） ----------
+console.log('服务列表解析（systemctl 输出）')
+{
+  const { parseUnits } = require('../agent/src/services')
+  const sample = [
+    'nginx.service    loaded active   running  A high performance web server',
+    'docker.service   loaded inactive dead     Docker Application Container Engine',
+    'ghost.service    not-found failed failed  Ghost unit',
+    'getty@.service   loaded active   running  Getty on tty1'
+  ].join('\n')
+  const files = ['nginx.service enabled', 'docker.service disabled', 'extra.service static'].join('\n')
+  const list = parseUnits(sample, files)
+  ok(list.find((s) => s.unit === 'nginx.service').active === 'active', 'ACTIVE 取 parts[2]（契约钉死）')
+  ok(list.find((s) => s.unit === 'nginx.service').enabled === 'enabled', 'enabled 来自 list-unit-files')
+  ok(list.find((s) => s.unit === 'nginx.service').desc === 'A high performance web server', '描述保留空格')
+  ok(!list.find((s) => s.unit === 'ghost.service'), 'not-found 幽灵单元被跳过')
+  ok(!list.find((s) => s.unit === 'getty@.service'), '模板单元被跳过')
+  ok(list.find((s) => s.unit === 'extra.service').active === 'inactive', '仅安装未加载的服务补为 inactive')
+  ok(Array.isArray(parseUnits('', '')) && parseUnits('', '').length === 0, '空输入 → 空列表')
+}
+
 // ---------- 单元：执行确认流 ----------
 console.log('执行确认流')
 // 审计落盘依赖 store 初始化（exec 与 AI 共用数据目录）
@@ -64,7 +85,14 @@ async function testConfirmFlow() {
   execMod.resolveConfirm(evt.id, true)
   await p3
 }
-main().catch((e) => { console.error('测试执行异常:', e); process.exit(1) })
+main()
+  .then(async () => {
+    // testAnthropicConvert 的断言在 mock 请求回调里异步落账，稍等片刻再总结
+    await new Promise((r) => setTimeout(r, 400))
+    console.log(`\n结果：${passed} 通过，${failed} 失败`)
+    process.exitCode = failed ? 1 : 0
+  })
+  .catch((e) => { console.error('测试执行异常:', e); process.exit(1) })
 
 async function main() {
   await testConfirmFlow()
@@ -187,6 +215,27 @@ console.log('HTTP API 全链路（含 SSE）')
   ok(auditRecs.some((r) => r.source === 'ai' && r.command === 'df -h'), 'AI 来源审计记录')
   ok(auditRecs.some((r) => r.source === 'manual' && r.command === 'echo manual-ok'), '手动来源审计记录')
 
+  // 指令历史（磁盘重建）：完成记录一命令一条（去重），挂起未决的不进转写
+  const hist = await req('GET', '/api/exec/history')
+  const histRecs = JSON.parse(hist.body).records
+  const manualRecs = histRecs.filter((r) => r.command === 'echo manual-ok')
+  ok(Array.isArray(histRecs) && manualRecs.length === 1 && String(manualRecs[0].output).includes('manual-ok'), '指令历史：完成记录一命令一条（不重复）')
+  ok(!histRecs.some((r) => r.command === 'rm -rf /tmp/whatever'), '指令历史：挂起未决命令不进转写')
+  ok(JSON.parse(hist.body).ok === true, '指令历史接口契约 { ok, records }')
+
+  // 服务控制：停止/重启两段式确认 + 非法服务名注入防护
+  const sv = await req('GET', '/api/services')
+  const svBody = JSON.parse(sv.body)
+  ok(svBody.ok === true ? Array.isArray(svBody.services) : typeof svBody.error === 'string', '服务列表契约（有 systemd 为数组，无则明确报错）')
+  const svStop = await req('POST', '/api/services/action', { name: 'nginx', action: 'stop' })
+  ok(JSON.parse(svStop.body).needConfirm === true, '服务停止需二次确认（needConfirm）')
+  const svRestart = await req('POST', '/api/services/action', { name: 'nginx', action: 'restart' })
+  ok(JSON.parse(svRestart.body).needConfirm === true, '服务重启需二次确认（needConfirm）')
+  const svInject = await req('POST', '/api/services/action', { name: 'x; rm -rf /', action: 'start', confirmed: true })
+  ok(svInject.status === 500 && /非法/.test(JSON.parse(svInject.body).error || ''), '非法服务名被拒（注入防护）')
+  const svBadOp = await req('POST', '/api/services/action', { name: 'nginx', action: 'explode', confirmed: true })
+  ok(svBadOp.status === 500 && /不支持/.test(JSON.parse(svBadOp.body).error || ''), '非法动作被拒（白名单）')
+
   const notFound = await req('GET', '/api/nothing')
   ok(notFound.status === 404, '未知接口 404')
 
@@ -250,6 +299,3 @@ async function testAnthropicConvert() {
   server.close()
   }
 }
-
-console.log(`\n结果：${passed} 通过，${failed} 失败`)
-process.exitCode = failed ? 1 : 0

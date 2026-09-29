@@ -50,7 +50,11 @@ export const api = {
   pending: () => req('/api/pending'),
   confirm: (id, approve) => req('/api/confirm', { method: 'POST', body: JSON.stringify({ id, approve }) }),
   exec: (command, confirmed) => req('/api/exec', { method: 'POST', body: JSON.stringify({ command, confirmed }) }),
-  audit: () => req('/api/audit')
+  execHistory: () => req('/api/exec/history'),
+  audit: () => req('/api/audit'),
+  services: () => req('/api/services'),
+  serviceAction: (name, action, confirmed) =>
+    req('/api/services/action', { method: 'POST', body: JSON.stringify({ name, action, confirmed }) })
 }
 
 // SSE 流式对话。返回 AbortController（停止按钮用）
